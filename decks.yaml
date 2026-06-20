@@ -1,0 +1,117 @@
+decks:
+  - slug: breya
+    name: "Breya"
+    title: "姐姐"
+    moxfield_id: "lsHZT1xSI0aAa3KAsvd4QQ"
+    notion_id: "d4a7ba85-80b4-4350-99fe-d508b2fd3c12"
+    colors: [W, U, B, R]
+    bracket: "3"
+    notes: "grindy eggs & recursive artifact value into artifact-based infinite combos"
+
+  - slug: ruric_thar
+    name: "Ruric Thar"
+    title: "Ponza"
+    moxfield_id: "IKaHWg6vq0uyxfBDQzCLAw"
+    notion_id: "23f14af5-a5a6-4b20-b7b9-c602d56b2c60"
+    colors: [G, R]
+    bracket: "4"
+    notes: "aggro punisher creatures + heavy reliance of Ruric Thar to stop combos; Kiki-Jiki combo finish"
+
+  - slug: titania
+    name: "Titania"
+    title: "Last Tree of Argoth"
+    moxfield_id: "3ZAKnH2RZkWkZYZ84A6KMw"
+    notion_id: "54f8d5aa-97fe-4a53-b35b-b744e5cf93ea"
+    colors: [G]
+    bracket: "3"
+    notes: "land-recursion hyper aggro"
+
+  - slug: rem_karolus
+    name: "Rem Karolus"
+    title: "We Burn Burn"
+    moxfield_id: "uxs0W24KMUmgjTME78yI5Q"
+    notion_id: "d7e9fa12-a6dd-4005-8f0a-e2765f561790"
+    colors: [R, W]
+    bracket: "2.9"
+    notes: "earthquake control into spell/damage doubled burn finishers"
+
+  - slug: kokusho
+    name: "Kokusho"
+    title: ""
+    moxfield_id: "aMIzNpcEEkeHyNQ_D1XBiA"
+    notion_id: "c3c026c5-3b57-4c37-8376-9615ec28ebf1"
+    colors: [B]
+    bracket: "3"
+    notes: "all-in repeated reanimator on Kokusho"
+
+  - slug: glarb
+    name: "Glarb"
+    title: "One Big Turn"
+    moxfield_id: "oYreUNL9-kmVUKhD0AZg0g"
+    notion_id: "b6794316-5a03-40bc-8d2f-0c2b178327b6"
+    colors: [U, G, B]
+    bracket: "2.9"
+    notes: "sultai big mana bullshit => theft"
+
+  - slug: niv_mizzet
+    name: "Niv-Mizzet"
+    title: ""
+    moxfield_id: "pHjjrBYLRUa7eaLDX4Z0hw"
+    notion_id: "5988b1af-3f31-4ae6-9468-8c5e43f0aaef"
+    colors: [G, U, W, B, R]
+    bracket: "2.5"
+    notes: "5c goodstuff pile"
+
+  - slug: ephara
+    name: "Ephara"
+    title: "It's a Control Deck"
+    moxfield_id: "wlELd_D-Jk69gQ35AYLv2Q"
+    notion_id: "c72c2dd1-ea93-4242-8092-97dd9ff6f90a"
+    colors: [U, W]
+    bracket: "3"
+    notes: "token spam control"
+
+  - slug: kykar
+    name: "Kykar"
+    title: ""
+    moxfield_id: "p877nuql5kGNloGMxlqY4A"
+    notion_id: "26a78410-3c03-800f-b32f-caa65a5d3074"
+    colors: [R, W, U]
+    bracket: "4"
+    notes: "twin-esque control beats into combos"
+
+  - slug: feldon
+    name: "Feldon"
+    title: "Loran's Smile"
+    moxfield_id: "-rD9Z2ffCECVZ7C6wDw2AA"
+    notion_id: "ae1f29d9-8a53-4d69-977b-4f7977cfef63"
+    colors: [R]
+    bracket: "2"
+    notes: "mono-red reanimator/stompy"
+
+  - slug: atemsis
+    name: "Atemsis"
+    title: ""
+    moxfield_id: "XawdjXZm-kyg_yzpFcK30A"
+    notion_id: "11978410-3c03-8035-87e3-e08b6d9e249b"
+    colors: [U]
+    bracket: "2"
+    notes: "control + big blue card draw"
+
+  - slug: rith
+    name: "Rith"
+    title: "and the *N* Sap Boys"
+    moxfield_id: "OypdhM-x-Ue6cYVWKau6yw"
+    notion_id: "1b67aa5a-898e-4765-a7ab-2745b6de68b0"
+    colors: [G, W, R]
+    bracket: "2"
+    notes: "go-wide saproling kindred, 'low power'"
+
+  - slug: karlov
+    name: "Karlov"
+    title: ""
+    moxfield_id: "VIQBA5gWEEeh0mWL0s84mQ"
+    notion_id: "27f78410-3c03-800f-b583-e4928d931bd7"
+    colors: [B, W]
+    bracket: "4"
+    notes: "hatebears + soul sisters voltron with plenty of interaction"

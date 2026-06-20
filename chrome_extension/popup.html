@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 280px;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      font-size: 14px;
+      padding: 16px;
+    }
+    h1 { font-size: 13px; color: #a78bfa; margin-bottom: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
+    #status {
+      min-height: 48px;
+      background: #16213e;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      line-height: 1.5;
+      color: #94a3b8;
+    }
+    #status.success { color: #86efac; }
+    #status.error { color: #fca5a5; }
+    button {
+      width: 100%;
+      padding: 9px;
+      background: #7c3aed;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: #6d28d9; }
+    button:disabled { background: #4c1d95; color: #a78bfa; cursor: default; }
+    details { margin-top: 14px; }
+    summary { font-size: 11px; color: #64748b; cursor: pointer; user-select: none; }
+    summary:hover { color: #94a3b8; }
+    .settings { margin-top: 8px; }
+    .settings label { font-size: 11px; color: #64748b; display: block; margin-bottom: 4px; }
+    .settings input {
+      width: 100%;
+      padding: 6px 8px;
+      background: #16213e;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-size: 12px;
+    }
+    .settings input:focus { outline: none; border-color: #7c3aed; }
+  </style>
+</head>
+<body>
+  <h1>MTG Agent Sync</h1>
+  <div id="status">Checking page...</div>
+  <button id="syncBtn" disabled>Sync to Pangolin</button>
+  <details>
+    <summary>Settings</summary>
+    <div class="settings">
+      <label for="serverUrl">Server URL</label>
+      <input id="serverUrl" type="text" placeholder="http://192.168.0.102:8765">
+    </div>
+  </details>
+  <script src="popup.js"></script>
+</body>
+</html>
