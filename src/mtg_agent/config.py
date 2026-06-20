@@ -24,6 +24,7 @@ class DeckConfig:
 class Config:
     mongodb_uri: str
     mongodb_db: str
+    notion_mcp_url: str = ""
     decks_path: str = ""
     decks: list[DeckConfig] = field(default_factory=list)
     decks_by_slug: dict[str, DeckConfig] = field(default_factory=dict)
@@ -32,6 +33,7 @@ class Config:
 def load_config() -> Config:
     mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
     mongodb_db = os.getenv("MONGODB_DB", "mtg_agent")
+    notion_mcp_url = os.getenv("NOTION_MCP_URL", "")
 
     decks_path = os.getenv(
         "DECKS_CONFIG",
@@ -47,6 +49,7 @@ def load_config() -> Config:
     return Config(
         mongodb_uri=mongodb_uri,
         mongodb_db=mongodb_db,
+        notion_mcp_url=notion_mcp_url,
         decks_path=decks_path,
         decks=decks,
         decks_by_slug=decks_by_slug,

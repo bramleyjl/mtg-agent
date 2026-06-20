@@ -4,7 +4,7 @@ import httpx
 import yaml
 
 from mtg_agent.clients import moxfield, scryfall
-from mtg_agent.clients.notion import update_deck_page
+from mtg_agent.clients.notion_mcp import update_deck_page
 from mtg_agent.config import Config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id
@@ -12,34 +12,39 @@ from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id
 
 async def session_sync(config: Config) -> list[dict]:
     """
-    For each configured deck: push current name/title from MongoDB to Notion,
+    For each configured deck: push current name/title from MongoDB to Notion via notion-mcp,
     and return a status row with timestamps so stale decks are visible.
-    Does not touch Moxfield.
     """
     results = []
-    async with httpx.AsyncClient(timeout=10.0) as _:
-        for deck_conf in config.decks:
-            stored = mongodb.get_deck(deck_conf.slug)
-            row: dict = {
-                "slug": deck_conf.slug,
-                "last_synced": stored.get("last_synced") if stored else None,
-                "moxfield_updated_at": stored.get("moxfield_updated_at") if stored else None,
-                "notion": None,
-            }
+    for deck_conf in config.decks:
+        stored = mongodb.get_deck(deck_conf.slug)
+        row: dict = {
+            "slug": deck_conf.slug,
+            "last_synced": stored.get("last_synced") if stored else None,
+            "moxfield_updated_at": stored.get("moxfield_updated_at") if stored else None,
+            "notion": None,
+        }
 
-            if not stored:
-                row["notion"] = "skipped — not yet synced from Moxfield"
-                results.append(row)
-                continue
+        if not stored:
+            row["notion"] = "skipped — not yet synced from Moxfield"
+            results.append(row)
+            continue
 
+        if config.notion_mcp_url:
             try:
-                await update_deck_page(deck_conf.notion_id, stored["name"], stored.get("title", ""))
+                await update_deck_page(
+                    config.notion_mcp_url,
+                    deck_conf.notion_id,
+                    stored["name"],
+                    stored.get("title", ""),
+                )
                 row["notion"] = "updated"
             except Exception as e:
                 row["notion"] = f"error: {e}"
+        else:
+            row["notion"] = "skipped — NOTION_MCP_URL not set"
 
-            results.append(row)
-
+        results.append(row)
     return results
 
 
@@ -183,21 +188,22 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
         "mainboard": mainboard,
     })
 
-    update_results = {}
+    update_results: dict = {}
 
     try:
-        _update_decks_yaml(
-            config.decks_path, slug, mox_name, mox_title
-        )
+        _update_decks_yaml(config.decks_path, slug, mox_name, mox_title)
         update_results["decks_yaml"] = "updated"
     except Exception as e:
         update_results["decks_yaml"] = f"error: {e}"
 
-    try:
-        await update_deck_page(deck_conf.notion_id, mox_name, mox_title)
-        update_results["notion"] = "updated"
-    except Exception as e:
-        update_results["notion"] = f"error: {e}"
+    if config.notion_mcp_url:
+        try:
+            await update_deck_page(config.notion_mcp_url, deck_conf.notion_id, mox_name, mox_title)
+            update_results["notion"] = "updated"
+        except Exception as e:
+            update_results["notion"] = f"error: {e}"
+    else:
+        update_results["notion"] = "skipped — NOTION_MCP_URL not set"
 
     return {
         "synced": slug,
