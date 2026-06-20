@@ -9,7 +9,7 @@
   "host_permissions": [
     "https://www.moxfield.com/*",
     "https://api2.moxfield.com/*",
-    "http://192.168.0.102:8765/*"
+    "http://YOUR_SERVER_IP:8765/*"
   ],
   "permissions": [
     "activeTab",

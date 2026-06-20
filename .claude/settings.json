@@ -2,7 +2,7 @@
   "mcpServers": {
     "mtg-agent": {
       "type": "http",
-      "url": "http://192.168.0.102:8765/mcp"
+      "url": "http://YOUR_SERVER_IP:8765/mcp"
     }
   },
   "hooks": {
