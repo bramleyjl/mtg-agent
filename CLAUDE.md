@@ -21,7 +21,7 @@ An AI-powered deckbuilding assistant for Magic: The Gathering, focused on the Co
 **Key integrations:**
 - MongoDB (already connected via MCP) — primary store for decklists, match history, preferences, and vector embeddings
 - Scryfall API — card lookup and search
-- Custom MCP server (planned) — exposes knowledge base tools to Claude
+- notion-mcp — handles all Notion interactions (deck page updates, task management); mtg-agent calls it directly over HTTP during sync operations so Notion auth lives only in notion-mcp
 
 ## Commander Format Rules
 
