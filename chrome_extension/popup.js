@@ -1,4 +1,4 @@
-const DEFAULT_SERVER = "http://192.168.0.102:8765";
+const DEFAULT_SERVER = "http://YOUR_SERVER_IP:8765";
 
 const statusEl = document.getElementById("status");
 const syncBtn = document.getElementById("syncBtn");
