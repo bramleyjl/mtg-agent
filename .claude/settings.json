@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "mtg-agent": {
+      "type": "http",
+      "url": "http://192.168.0.102:8765/mcp"
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ssh pangolin \"cd /home/admin/mtg_agent && nohup .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk --if-stale > /tmp/scryfall_bulk_refresh.log 2>&1 &\"",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

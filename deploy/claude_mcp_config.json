@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "mtg-agent": {
+      "url": "http://192.168.0.102:8765/mcp"
+    }
+  }
+}

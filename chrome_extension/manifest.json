@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "MTG Agent - Moxfield Sync",
+  "version": "1.0",
+  "description": "Sync a Moxfield deck to pangolin with one click.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "host_permissions": [
+    "https://www.moxfield.com/*",
+    "https://api2.moxfield.com/*",
+    "http://192.168.0.102:8765/*"
+  ],
+  "permissions": [
+    "activeTab",
+    "storage"
+  ]
+}

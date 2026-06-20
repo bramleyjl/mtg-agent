@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mtg-agent"
+version = "0.1.0"
+description = "MCP server for MTG Commander deckbuilding assistance"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.0.0",
+    "pymongo>=4.10.0",
+    "httpx>=0.28.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+mtg-agent = "mtg_agent.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mtg_agent"]
