@@ -4,7 +4,7 @@ import httpx
 import yaml
 
 from mtg_agent.clients import moxfield, scryfall
-from mtg_agent.clients.notion_mcp import update_deck_page
+from mtg_agent.clients.notion_mcp import fetch_deck_page, update_deck_page
 from mtg_agent.config import Config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id
@@ -66,10 +66,37 @@ async def list_decks(config: Config) -> list[dict]:
     return results
 
 
+def _slim_card(entry: dict) -> dict:
+    """Strip full Scryfall data from a card entry, keeping only name and oracle_id."""
+    result: dict = {"name": entry["name"]}
+    oracle_id = entry.get("scryfall", {}).get("oracle_id")
+    if oracle_id:
+        result["oracle_id"] = oracle_id
+    return result
+
+
+def _slim_deck(stored: dict) -> dict:
+    """Return top-level deck properties and card names/oracle_ids only."""
+    return {
+        "slug": stored.get("slug"),
+        "name": stored.get("name"),
+        "title": stored.get("title"),
+        "colors": stored.get("colors"),
+        "bracket": stored.get("bracket"),
+        "notes": stored.get("notes"),
+        "moxfield_id": stored.get("moxfield_id"),
+        "notion_id": stored.get("notion_id"),
+        "last_synced": stored.get("last_synced"),
+        "moxfield_updated_at": stored.get("moxfield_updated_at"),
+        "commanders": [_slim_card(c) for c in stored.get("commanders", [])],
+        "mainboard": [_slim_card(c) for c in stored.get("mainboard", [])],
+    }
+
+
 async def get_deck(slug: str, config: Config) -> dict | None:
     """
-    Retrieve a deck from MongoDB. Returns error dict if not yet synced.
-    Includes full card list with Scryfall data.
+    Retrieve a deck's top-level properties and card list (names + oracle_ids only).
+    Use get_deck_full() for full Scryfall card data and Notion page context.
     """
     deck_conf = config.decks_by_slug.get(slug)
     if not deck_conf:
@@ -86,7 +113,35 @@ async def get_deck(slug: str, config: Config) -> dict | None:
                 "bracket": deck_conf.bracket,
             },
         }
-    return stored
+    return _slim_deck(stored)
+
+
+async def get_deck_full(slug: str, config: Config) -> dict | None:
+    """
+    Retrieve full deck context: complete Scryfall card data (oracle text, mana cost,
+    type line, etc.) plus the Notion deck page content (EDH game history, notes, links).
+    Use get_deck() for the lightweight version.
+    """
+    deck_conf = config.decks_by_slug.get(slug)
+    if not deck_conf:
+        return None
+
+    stored = mongodb.get_deck(slug)
+    if not stored:
+        return {
+            "error": f"Deck '{slug}' not yet synced. Run sync_deck('{slug}') first.",
+        }
+
+    result = dict(stored)
+
+    if config.notion_mcp_url and deck_conf.notion_id:
+        try:
+            notion_content = await fetch_deck_page(config.notion_mcp_url, deck_conf.notion_id)
+            result["notion_page"] = notion_content
+        except Exception as e:
+            result["notion_page"] = f"error: {e}"
+
+    return result
 
 
 def _update_decks_yaml(decks_path: str, slug: str, name: str, title: str) -> None:

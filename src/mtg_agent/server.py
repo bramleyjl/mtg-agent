@@ -28,12 +28,25 @@ async def list_decks() -> list[dict]:
 @mcp.tool()
 async def get_deck(slug: str) -> dict | None:
     """
-    Retrieve a stored deck by slug. Includes commanders and full mainboard
-    with Scryfall card data (mana cost, type, oracle text, etc).
+    Retrieve a deck's top-level properties and card list (names + oracle_ids only).
+    Lightweight — safe to call for any deck overview or card-list work.
 
     Use list_decks() to see available slugs.
+    Use get_deck_full() when you need oracle text, rulings, or Notion game history.
     """
     return await decks.get_deck(slug, config)
+
+
+@mcp.tool()
+async def get_deck_full(slug: str) -> dict | None:
+    """
+    Retrieve full deck context: complete Scryfall card data (oracle text, mana cost,
+    type line, etc.) plus the Notion deck page content (EDH game history, notes, links).
+
+    Prefer get_deck() for lightweight queries; use this only when card text or
+    game history is needed.
+    """
+    return await decks.get_deck_full(slug, config)
 
 
 

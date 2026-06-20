@@ -21,3 +21,15 @@ async def update_deck_page(url: str, page_id: str, name: str, title: str) -> Non
                 "notion_update_page_properties",
                 {"page_id": page_id, "properties": properties},
             )
+
+
+async def fetch_deck_page(url: str, page_id: str) -> str | None:
+    """Fetch a Notion deck page and return its rendered content."""
+    async with streamablehttp_client(url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("notion-fetch", {"id": page_id})
+            for block in result.content:
+                if hasattr(block, "text"):
+                    return block.text
+            return None
