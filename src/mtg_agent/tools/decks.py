@@ -134,9 +134,10 @@ async def get_deck_full(slug: str, config: Config) -> dict | None:
 
     result = dict(stored)
 
-    if config.notion_mcp_url and deck_conf.notion_id:
+    notion_id = stored.get("notion_id") or deck_conf.notion_id
+    if config.notion_mcp_url and notion_id:
         try:
-            result["notion_page"] = await fetch_deck_page(config.notion_mcp_url, deck_conf.notion_id)
+            result["notion_page"] = await fetch_deck_page(config.notion_mcp_url, notion_id)
         except Exception as e:
             result["notion_page"] = f"error: {e}"
 
