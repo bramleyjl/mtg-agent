@@ -14,7 +14,7 @@ REMOTE_DIR="/home/admin/mtg_agent"
 echo "==> Syncing project to pangolin..."
 rsync -av --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='.env' \
-    /home/john/Projects/mtg_agent/ "${REMOTE}:${REMOTE_DIR}/"
+    /home/john/Projects/mcps/mtg-agent/ "${REMOTE}:${REMOTE_DIR}/"
 
 echo "==> Installing Python dependencies..."
 ssh "$REMOTE" "
