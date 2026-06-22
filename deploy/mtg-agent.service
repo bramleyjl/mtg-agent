@@ -6,9 +6,9 @@ Requires=mongod.service
 [Service]
 Type=simple
 User=admin
-WorkingDirectory=/home/admin/mtg_agent
-EnvironmentFile=/home/admin/mtg_agent/.env
-ExecStart=/home/admin/mtg_agent/.venv/bin/mtg-agent
+WorkingDirectory=/home/admin/Projects/mcps/mtg-agent
+EnvironmentFile=/home/admin/Projects/mcps/mtg-agent/.env
+ExecStart=/home/admin/Projects/mcps/mtg-agent/.venv/bin/mtg-agent
 Restart=on-failure
 RestartSec=5
 

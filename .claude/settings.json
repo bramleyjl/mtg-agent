@@ -11,7 +11,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ssh pangolin \"cd /home/admin/mtg_agent && nohup .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk --if-stale > /tmp/scryfall_bulk_refresh.log 2>&1 &\"",
+            "command": "cd /home/admin/Projects/mcps/mtg-agent && nohup .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk --if-stale > /tmp/scryfall_bulk_refresh.log 2>&1 &",
             "async": true
           }
         ]
