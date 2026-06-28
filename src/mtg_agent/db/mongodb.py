@@ -28,10 +28,6 @@ def decks() -> Collection:
     return get_db()["decks"]
 
 
-def cards_cache() -> Collection:
-    return get_db()["cards_cache"]
-
-
 def _create_index(coll: Collection, keys: list, **kwargs) -> None:
     """Create an index, ignoring conflicts when the field is already indexed under a different name."""
     try:
@@ -44,8 +40,6 @@ def _create_index(coll: Collection, keys: list, **kwargs) -> None:
 def _ensure_indexes() -> None:
     db = get_db()
     _create_index(db["decks"], [("slug", ASCENDING)], unique=True)
-    _create_index(db["cards_cache"], [("name", ASCENDING)], unique=True)
-    _create_index(db["cards_cache"], [("id", ASCENDING)])
     _create_index(db["scryfall_oracle"], [("oracle_id", ASCENDING)], unique=True)
     _create_index(db["scryfall_oracle"], [("name", ASCENDING)])
     _create_index(db["scryfall_bulk"], [("id", ASCENDING)], unique=True)
@@ -62,18 +56,6 @@ def upsert_deck(slug: str, data: dict[str, Any]) -> None:
 
 def get_deck(slug: str) -> dict[str, Any] | None:
     return decks().find_one({"slug": slug}, {"_id": 0})
-
-
-def upsert_card_cache(name: str, scryfall_data: dict[str, Any]) -> None:
-    cards_cache().update_one(
-        {"name": name},
-        {"$set": {**scryfall_data, "cached_at": datetime.now(timezone.utc)}},
-        upsert=True,
-    )
-
-
-def get_cached_card(name: str) -> dict[str, Any] | None:
-    return cards_cache().find_one({"name": name}, {"_id": 0})
 
 
 def get_oracle_card(name: str) -> dict[str, Any] | None:

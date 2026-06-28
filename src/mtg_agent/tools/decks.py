@@ -206,14 +206,13 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
             # Always enrich from oracle data (has type_line, mana_cost, oracle_text).
             # Priority: oracle bulk by name → per-deck cache → live Scryfall API.
             # scryfall_id is stored separately for printing-specific queries (prices, border, etc.)
-            card_data = get_bulk_card(name) or mongodb.get_cached_card(name)
+            card_data = get_bulk_card(name)
             if card_data:
                 enriched_cards[name] = card_data
                 continue
 
             card_data = await scryfall.get_card_by_name(client, name)
             if card_data:
-                mongodb.upsert_card_cache(name, card_data)
                 enriched_cards[name] = card_data
             else:
                 missing.append(name)

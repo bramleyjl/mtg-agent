@@ -1,5 +1,4 @@
 from mtg_agent.clients.scryfall import search_cards as _search_scryfall
-from mtg_agent.db.mongodb import get_cached_card
 
 
 async def search_cards(query: str, page: int = 1) -> dict:
@@ -17,19 +16,15 @@ async def search_cards(query: str, page: int = 1) -> dict:
 async def get_card(name: str) -> dict | None:
     """
     Look up a single card by exact name.
-    Priority: per-deck cache → bulk dataset → live Scryfall API.
+    Priority: bulk dataset → live Scryfall API.
     """
-    from mtg_agent.db.mongodb import get_bulk_card, upsert_card_cache
+    from mtg_agent.db.mongodb import get_bulk_card
+    from mtg_agent.clients.scryfall import get_card_by_name
 
-    cached = get_cached_card(name) or get_bulk_card(name)
+    cached = get_bulk_card(name)
     if cached:
         return cached
 
     import httpx
-    from mtg_agent.clients.scryfall import get_card_by_name
-
     async with httpx.AsyncClient(timeout=15.0) as client:
-        data = await get_card_by_name(client, name)
-        if data:
-            upsert_card_cache(name, data)
-        return data
+        return await get_card_by_name(client, name)

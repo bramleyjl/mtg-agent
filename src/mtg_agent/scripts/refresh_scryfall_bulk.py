@@ -67,7 +67,9 @@ def _is_stale(dataset: str) -> bool:
     last = _last_updated(dataset)
     if last is None:
         return True
-    return last < datetime.now(timezone.utc) - timedelta(days=STALE_AFTER_DAYS)
+    # Stored timestamps are naive UTC; compare as naive to avoid offset mismatch
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return last < now - timedelta(days=STALE_AFTER_DAYS)
 
 
 
