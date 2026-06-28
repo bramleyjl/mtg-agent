@@ -8,11 +8,14 @@ from mcp.client.streamable_http import streamablehttp_client
 
 
 async def update_deck_page(url: str, page_id: str, name: str, title: str) -> None:
+    # Only sync Title from Moxfield; Name is managed manually in Notion
+    # (Notion names often have manual suffixes like "✔️" that we don't want to overwrite)
+    if not title:
+        return
+
     properties: dict = {
-        "Name": {"title": [{"text": {"content": name}}]},
+        "Title": {"rich_text": [{"text": {"content": title}}]},
     }
-    if title:
-        properties["Title"] = {"rich_text": [{"text": {"content": title}}]}
 
     async with streamablehttp_client(url) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -29,7 +32,6 @@ async def fetch_deck_page(url: str, page_id: str) -> dict | None:
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("notion_get_page", {"page_id": page_id})
-            # notion_get_page returns a dict serialized as a text block
             for block in result.content:
                 if hasattr(block, "text"):
                     import json
