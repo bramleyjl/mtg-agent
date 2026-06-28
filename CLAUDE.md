@@ -51,3 +51,29 @@ John's preferences, play style, and deck history are tracked in the memory syste
 - Scryfall API is free with no auth required; be respectful of rate limits (10 req/sec max, prefer bulk data downloads for large queries)
 - EDHREC has an unofficial API useful for commander-specific recommendations
 - Decklists can be imported from Moxfield/Archidekt export formats (plain text: `1 Card Name`)
+
+## Server Setup (pangolin)
+
+After deploying with `scripts/deploy_pangolin.sh`, do these one-time steps on the server:
+
+**1. Create `.env`** at `/home/admin/mtg_agent/.env`:
+```
+MONGODB_URI=mongodb://localhost:27017
+MONGODB_DB=mtg_agent
+DECKS_CONFIG=/home/admin/mtg_agent/decks.yaml
+NOTION_MCP_URL=http://localhost:8766/mcp
+MCP_TRANSPORT=streamable-http
+MCP_HOST=0.0.0.0
+MCP_PORT=8765
+```
+
+**2. Initial Scryfall bulk data load** (one-time, takes a few minutes):
+```bash
+ssh pangolin 'cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk'
+```
+
+**3. Daily refresh cron job** — add to the `admin` user's crontab (`crontab -e` on pangolin):
+```
+0 3 * * * cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk --if-stale >> /tmp/scryfall_bulk_refresh.log 2>&1
+```
+This runs nightly at 3am and skips if data is less than 7 days old. Check logs at `/tmp/scryfall_bulk_refresh.log`.
