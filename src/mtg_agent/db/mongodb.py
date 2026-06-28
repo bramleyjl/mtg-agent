@@ -40,6 +40,9 @@ def _create_index(coll: Collection, keys: list, **kwargs) -> None:
 def _ensure_indexes() -> None:
     db = get_db()
     _create_index(db["decks"], [("slug", ASCENDING)], unique=True)
+    _create_index(db["game_history"], [("notion_id", ASCENDING)], unique=True)
+    _create_index(db["game_history"], [("deck_slug", ASCENDING)])
+    _create_index(db["game_history"], [("date", ASCENDING)])
     _create_index(db["scryfall_oracle"], [("oracle_id", ASCENDING)], unique=True)
     _create_index(db["scryfall_oracle"], [("name", ASCENDING)])
     _create_index(db["scryfall_bulk"], [("id", ASCENDING)], unique=True)
@@ -56,6 +59,27 @@ def upsert_deck(slug: str, data: dict[str, Any]) -> None:
 
 def get_deck(slug: str) -> dict[str, Any] | None:
     return decks().find_one({"slug": slug}, {"_id": 0})
+
+
+def upsert_game_record(record: dict[str, Any]) -> None:
+    get_db()["game_history"].update_one(
+        {"notion_id": record["notion_id"]},
+        {"$set": record},
+        upsert=True,
+    )
+
+
+def get_game_history(deck_slug: str) -> list[dict[str, Any]]:
+    return list(get_db()["game_history"].find(
+        {"deck_slug": deck_slug},
+        {"_id": 0},
+        sort=[("date", ASCENDING)],
+    ))
+
+
+def get_known_game_ids(deck_slug: str) -> set[str]:
+    docs = get_db()["game_history"].find({"deck_slug": deck_slug}, {"notion_id": 1, "_id": 0})
+    return {d["notion_id"] for d in docs}
 
 
 def get_oracle_card(name: str) -> dict[str, Any] | None:
