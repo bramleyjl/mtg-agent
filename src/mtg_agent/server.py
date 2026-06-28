@@ -41,12 +41,22 @@ async def get_deck(slug: str) -> dict | None:
 async def get_deck_full(slug: str) -> dict | None:
     """
     Retrieve full deck context: complete Scryfall card data (oracle text, mana cost,
-    type line, etc.) plus the Notion deck page content (EDH game history, notes, links).
+    type line, etc.) plus structured game history from MongoDB.
 
     Prefer get_deck() for lightweight queries; use this only when card text or
     game history is needed.
     """
     return await decks.get_deck_full(slug, config)
+
+
+@mcp.tool()
+async def sync_game_history(slug: str) -> dict:
+    """
+    Sync game history for a deck from Notion to MongoDB.
+    Fetches only new game records not already stored (incremental).
+    Run this after logging new games in Notion to bring MongoDB up to date.
+    """
+    return await decks.sync_game_history(slug, config)
 
 
 

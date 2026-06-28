@@ -26,17 +26,21 @@ async def update_deck_page(url: str, page_id: str, name: str, title: str) -> Non
             )
 
 
-async def fetch_deck_page(url: str, page_id: str) -> dict | None:
-    """Fetch a Notion deck page and return its properties and metadata."""
+async def fetch_page(url: str, page_id: str) -> dict | None:
+    """Fetch any Notion page by ID and return the raw Notion API response dict."""
+    import json
     async with streamablehttp_client(url) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             result = await session.call_tool("notion_get_page", {"page_id": page_id})
             for block in result.content:
                 if hasattr(block, "text"):
-                    import json
                     try:
                         return json.loads(block.text)
                     except (json.JSONDecodeError, TypeError):
-                        return {"raw": block.text}
+                        return None
             return None
+
+
+# Alias kept for callers that fetched deck pages before this refactor
+fetch_deck_page = fetch_page
