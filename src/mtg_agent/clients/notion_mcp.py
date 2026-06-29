@@ -12,10 +12,13 @@ async def update_page_properties(url: str, page_id: str, properties: dict) -> No
     async with streamablehttp_client(url) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
-            await session.call_tool(
+            result = await session.call_tool(
                 "notion_update_page_properties",
                 {"page_id": page_id, "properties": properties},
             )
+            if result.isError:
+                msg = next((b.text for b in result.content if hasattr(b, "text")), "unknown error")
+                raise RuntimeError(f"notion_update_page_properties failed: {msg}")
 
 
 async def update_deck_page(url: str, page_id: str, name: str, title: str) -> None:
