@@ -5,7 +5,7 @@ import httpx
 import yaml
 
 from mtg_agent.clients import moxfield, scryfall
-from mtg_agent.clients.notion_mcp import fetch_page, update_deck_page
+from mtg_agent.clients.notion_mcp import fetch_page, update_deck_page, update_page_properties
 from mtg_agent.config import Config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id
@@ -60,7 +60,6 @@ async def sync_game_history(slug: str, config: Config) -> dict:
     known_ids = mongodb.get_known_game_ids(slug)
     new_ids = [gid for gid in game_ids if gid not in known_ids]
 
-    commanders = {c["name"] for c in stored.get("commanders", [])}
     synced = 0
     errors = []
 
@@ -72,14 +71,25 @@ async def sync_game_history(slug: str, config: Config) -> dict:
                 continue
             props = game_page.get("properties", {})
             winner = _parse_notion_prop(props.get("Winner", {}))
+
+            # Determine win/loss using the game record's own Deck relation,
+            # not the slug we happen to be iterating over.
+            deck_notion_ids: list[str] = _parse_notion_prop(props.get("Deck", {})) or []  # type: ignore[assignment]
+            john_deck = None
+            for did in deck_notion_ids:
+                john_deck = mongodb.get_deck_by_notion_id(did)
+                if john_deck:
+                    break
+            john_commanders = {c["name"] for c in (john_deck or {}).get("commanders", [])}
+            won = any(winner.lower() in c.lower() for c in john_commanders) if winner else False
+
             record = {
                 "notion_id": game_id,
                 "deck_slug": slug,
                 "date": _parse_notion_prop(props.get("Date", {})),
-                "opponents": _parse_notion_prop(props.get("Opponents", {})) or [],
                 "enemy_commanders": _parse_notion_prop(props.get("Enemy Commanders", {})) or [],
                 "winner": winner,
-                "won": any(winner.lower() in c.lower() for c in commanders) if winner else False,
+                "won": won,
                 "notes": _parse_notion_prop(props.get("Notes", {})),
                 "synced_at": datetime.now(timezone.utc),
             }
@@ -91,6 +101,74 @@ async def sync_game_history(slug: str, config: Config) -> dict:
     result: dict = {"slug": slug, "new": synced, "total": len(game_ids), "already_known": len(known_ids)}
     if errors:
         result["errors"] = errors
+    return result
+
+
+async def normalize_enemy_commanders(config: Config) -> dict:
+    """
+    Resolve short/informal enemy commander names (and Winner) to full Scryfall card
+    names across all game_history records, then update both MongoDB and Notion pages.
+    Skips dual-commander pairs (containing "//") and ambiguous names.
+    """
+    db = mongodb.get_db()
+
+    # Collect all unique commander names that appear anywhere
+    unique_names: set[str] = set()
+    for doc in db["game_history"].find({}, {"enemy_commanders": 1, "winner": 1, "_id": 0}):
+        unique_names.update(doc.get("enemy_commanders", []))
+        if doc.get("winner"):
+            unique_names.add(doc["winner"])
+
+    # Build short→full mapping for names that can be unambiguously resolved
+    name_map: dict[str, str] = {}
+    for name in unique_names:
+        full = mongodb.resolve_commander_name(name)
+        if full:
+            name_map[name] = full
+
+    if not name_map:
+        return {"updated_records": 0, "resolved": {}}
+
+    # Find all records that contain any resolvable name
+    affected = list(db["game_history"].find({
+        "$or": [
+            {"enemy_commanders": {"$in": list(name_map)}},
+            {"winner": {"$in": list(name_map)}},
+        ]
+    }, {"_id": 0}))
+
+    updated = 0
+    notion_errors: list[str] = []
+
+    for record in affected:
+        new_enemy = [name_map.get(n, n) for n in record["enemy_commanders"]]
+        new_winner = name_map.get(record.get("winner") or "", record.get("winner"))
+
+        # Recalculate won with updated winner name
+        john_deck = mongodb.get_deck_by_notion_id(
+            record.get("deck_notion_id") or ""
+        ) or mongodb.get_deck(record["deck_slug"])
+        john_commanders = {c["name"] for c in (john_deck or {}).get("commanders", [])}
+        won = any(new_winner.lower() in c.lower() for c in john_commanders) if new_winner else False
+
+        mongodb.upsert_game_record({**record, "enemy_commanders": new_enemy, "winner": new_winner, "won": won})
+
+        if config.notion_mcp_url:
+            notion_props: dict = {
+                "Enemy Commanders": {"multi_select": [{"name": n} for n in new_enemy]},
+            }
+            if record.get("winner") and record["winner"] in name_map:
+                notion_props["Winner"] = {"select": {"name": new_winner}}
+            try:
+                await update_page_properties(config.notion_mcp_url, record["notion_id"], notion_props)
+            except Exception as e:
+                notion_errors.append(f"{record['notion_id']}: {e}")
+
+        updated += 1
+
+    result: dict = {"updated_records": updated, "resolved": name_map}
+    if notion_errors:
+        result["notion_errors"] = notion_errors
     return result
 
 

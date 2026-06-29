@@ -7,16 +7,8 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 
-async def update_deck_page(url: str, page_id: str, name: str, title: str) -> None:
-    # Only sync Title from Moxfield; Name is managed manually in Notion
-    # (Notion names often have manual suffixes like "✔️" that we don't want to overwrite)
-    if not title:
-        return
-
-    properties: dict = {
-        "Title": {"rich_text": [{"text": {"content": title}}]},
-    }
-
+async def update_page_properties(url: str, page_id: str, properties: dict) -> None:
+    """Update arbitrary properties on a Notion page using Notion API property format."""
     async with streamablehttp_client(url) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -24,6 +16,16 @@ async def update_deck_page(url: str, page_id: str, name: str, title: str) -> Non
                 "notion_update_page_properties",
                 {"page_id": page_id, "properties": properties},
             )
+
+
+async def update_deck_page(url: str, page_id: str, name: str, title: str) -> None:
+    # Only sync Title from Moxfield; Name is managed manually in Notion
+    # (Notion names often have manual suffixes like "✔️" that we don't want to overwrite)
+    if not title:
+        return
+    await update_page_properties(url, page_id, {
+        "Title": {"rich_text": [{"text": {"content": title}}]},
+    })
 
 
 async def fetch_page(url: str, page_id: str) -> dict | None:

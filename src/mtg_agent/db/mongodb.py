@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -40,6 +41,7 @@ def _create_index(coll: Collection, keys: list, **kwargs) -> None:
 def _ensure_indexes() -> None:
     db = get_db()
     _create_index(db["decks"], [("slug", ASCENDING)], unique=True)
+    _create_index(db["decks"], [("notion_id", ASCENDING)])
     _create_index(db["game_history"], [("notion_id", ASCENDING)], unique=True)
     _create_index(db["game_history"], [("deck_slug", ASCENDING)])
     _create_index(db["game_history"], [("date", ASCENDING)])
@@ -61,6 +63,10 @@ def get_deck(slug: str) -> dict[str, Any] | None:
     return decks().find_one({"slug": slug}, {"_id": 0})
 
 
+def get_deck_by_notion_id(notion_id: str) -> dict[str, Any] | None:
+    return decks().find_one({"notion_id": notion_id}, {"_id": 0})
+
+
 def upsert_game_record(record: dict[str, Any]) -> None:
     get_db()["game_history"].update_one(
         {"notion_id": record["notion_id"]},
@@ -80,6 +86,53 @@ def get_game_history(deck_slug: str) -> list[dict[str, Any]]:
 def get_known_game_ids(deck_slug: str) -> set[str]:
     docs = get_db()["game_history"].find({"deck_slug": deck_slug}, {"notion_id": 1, "_id": 0})
     return {d["notion_id"] for d in docs}
+
+
+def resolve_commander_name(name: str) -> str | None:
+    """
+    Resolve a potentially shortened commander name to its full Scryfall card name.
+    Returns the full name if unambiguously resolved, or None if exact/ambiguous.
+    Skips dual-commander pair strings (containing "//").
+    """
+    if "//" in name:
+        return None
+    db = get_db()
+    # Already an exact match — nothing to resolve
+    if db["scryfall_oracle"].find_one({"name": name}, {"_id": 0}):
+        return None
+    # Find cards starting with "name," (e.g., "Lurrus" → "Lurrus, the Dream-Den")
+    pattern = re.compile(f"^{re.escape(name)},", re.IGNORECASE)
+    matches = list(db["scryfall_oracle"].find(
+        {"name": pattern, "type_line": re.compile("Legendary")},
+        {"name": 1, "_id": 0},
+    ).limit(2))
+    if len(matches) == 1:
+        return matches[0]["name"]
+    return None
+
+
+def get_enemy_commander_stats(deck_slug: str | None = None) -> list[dict[str, Any]]:
+    """Aggregate enemy commander appearances and win rates from game_history."""
+    pipeline: list[dict] = []
+    if deck_slug:
+        pipeline.append({"$match": {"deck_slug": deck_slug}})
+    pipeline += [
+        {"$unwind": "$enemy_commanders"},
+        {"$group": {
+            "_id": "$enemy_commanders",
+            "appearances": {"$sum": 1},
+            "wins": {"$sum": {"$cond": [{"$eq": ["$winner", "$enemy_commanders"]}, 1, 0]}},
+        }},
+        {"$project": {
+            "_id": 0,
+            "commander": "$_id",
+            "appearances": 1,
+            "wins": 1,
+            "win_rate": {"$round": [{"$divide": ["$wins", "$appearances"]}, 2]},
+        }},
+        {"$sort": {"appearances": -1, "wins": -1}},
+    ]
+    return list(get_db()["game_history"].aggregate(pipeline))
 
 
 def get_oracle_card(name: str) -> dict[str, Any] | None:
