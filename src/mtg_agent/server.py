@@ -6,6 +6,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from mtg_agent.config import load_config
+from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import init_db
 from mtg_agent.tools import cards, decks
 
@@ -57,6 +58,27 @@ async def sync_game_history(slug: str) -> dict:
     Run this after logging new games in Notion to bring MongoDB up to date.
     """
     return await decks.sync_game_history(slug, config)
+
+
+@mcp.tool()
+async def normalize_enemy_commanders() -> dict:
+    """
+    Resolve short/informal enemy commander names to full Scryfall card names
+    across all game history records. Updates both MongoDB and Notion game pages.
+    Run once after initial game history import, and again after adding new games
+    with non-canonical commander names.
+    """
+    return await decks.normalize_enemy_commanders(config)
+
+
+@mcp.tool()
+async def get_enemy_commander_stats(deck_slug: str = "") -> list:
+    """
+    Aggregate enemy commander appearances and win rates from game history.
+    Pass a deck_slug to filter to a specific deck, or omit for all decks.
+    Returns commanders sorted by appearances descending.
+    """
+    return mongodb.get_enemy_commander_stats(deck_slug or None)
 
 
 
