@@ -90,24 +90,40 @@ def get_known_game_ids(deck_slug: str) -> set[str]:
 
 def resolve_commander_name(name: str) -> str | None:
     """
-    Resolve a potentially shortened commander name to its full Scryfall card name.
-    Returns the full name if unambiguously resolved, or None if exact/ambiguous.
+    Resolve a shortened commander name to its full Scryfall card name.
+    Returns the resolved name, or None if already exact or unresolvable.
     Skips dual-commander pair strings (containing "//").
+
+    Tries comma OR space after the prefix so both "Lurrus, the Dream-Den" and
+    "Feldon of the Third Path" / "Niv-Mizzet Reborn" are reachable. When
+    multiple cards match (e.g. "Titania" → two cards), cross-references known
+    deck commanders to break the tie.
     """
     if "//" in name:
         return None
     db = get_db()
-    # Already an exact match — nothing to resolve
-    if db["scryfall_oracle"].find_one({"name": name}, {"_id": 0}):
+    # Only skip resolution if the exact name is itself a Legendary (i.e. already a commander).
+    # Non-Legendary exact matches (e.g. Vanguard cards) shouldn't block resolution.
+    exact = db["scryfall_oracle"].find_one({"name": name}, {"type_line": 1, "_id": 0})
+    if exact and "Legendary" in (exact.get("type_line") or ""):
         return None
-    # Find cards starting with "name," (e.g., "Lurrus" → "Lurrus, the Dream-Den")
-    pattern = re.compile(f"^{re.escape(name)},", re.IGNORECASE)
+    pattern = re.compile(f"^{re.escape(name)}[, ]", re.IGNORECASE)
     matches = list(db["scryfall_oracle"].find(
         {"name": pattern, "type_line": re.compile("Legendary")},
         {"name": 1, "_id": 0},
-    ).limit(2))
+    ).limit(10))
     if len(matches) == 1:
         return matches[0]["name"]
+    if len(matches) > 1:
+        # Break tie by preferring a commander John actually plays
+        known = {
+            c["name"]
+            for deck in db["decks"].find({}, {"commanders.name": 1, "_id": 0})
+            for c in deck.get("commanders", [])
+        }
+        deck_matches = [m["name"] for m in matches if m["name"] in known]
+        if len(deck_matches) == 1:
+            return deck_matches[0]
     return None
 
 
