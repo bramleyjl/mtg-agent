@@ -5,7 +5,7 @@ import httpx
 import yaml
 
 from mtg_agent.clients import moxfield, scryfall
-from mtg_agent.clients.notion_mcp import fetch_page, update_deck_page, update_page_properties
+from mtg_agent.clients.notion_mcp import fetch_page, update_deck_page
 from mtg_agent.config import Config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id
@@ -138,7 +138,6 @@ async def normalize_enemy_commanders(config: Config) -> dict:
     }, {"_id": 0}))
 
     updated = 0
-    notion_errors: list[str] = []
 
     for record in affected:
         new_enemy = [name_map.get(n, n) for n in record["enemy_commanders"]]
@@ -152,24 +151,12 @@ async def normalize_enemy_commanders(config: Config) -> dict:
         won = any(new_winner.lower() in c.lower() for c in john_commanders) if new_winner else False
 
         mongodb.upsert_game_record({**record, "enemy_commanders": new_enemy, "winner": new_winner, "won": won})
-
-        if config.notion_mcp_url:
-            notion_props: dict = {
-                "Enemy Commanders": {"multi_select": [{"name": n} for n in new_enemy]},
-            }
-            if record.get("winner") and record["winner"] in name_map:
-                notion_props["Winner"] = {"select": {"name": new_winner}}
-            try:
-                await update_page_properties(config.notion_mcp_url, record["notion_id"], notion_props)
-            except Exception as e:
-                notion_errors.append(f"{record['notion_id']}: {e}")
-
         updated += 1
 
-    result: dict = {"updated_records": updated, "resolved": name_map}
-    if notion_errors:
-        result["notion_errors"] = notion_errors
-    return result
+    # NOTE: Notion multi_select doesn't allow commas in option names, so full
+    # Scryfall card names (e.g. "Lurrus, the Dream-Den") can't be pushed back
+    # to Notion. Normalization is MongoDB-only; Notion retains the short names.
+    return {"updated_records": updated, "resolved": name_map}
 
 
 async def session_sync(config: Config) -> list[dict]:
