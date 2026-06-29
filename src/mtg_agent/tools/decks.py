@@ -70,10 +70,14 @@ async def sync_game_history(slug: str, config: Config) -> dict:
                 errors.append(game_id)
                 continue
             props = game_page.get("properties", {})
-            winner = _parse_notion_prop(props.get("Winner", {}))
+            raw_winner: str | None = _parse_notion_prop(props.get("Winner", {}))  # type: ignore[assignment]
+            raw_enemy: list[str] = _parse_notion_prop(props.get("Enemy Commanders", {})) or []  # type: ignore[assignment]
 
-            # Determine win/loss using the game record's own Deck relation,
-            # not the slug we happen to be iterating over.
+            # Resolve short names to full Scryfall canonical names for MongoDB storage.
+            full_enemy = [mongodb.resolve_commander_name(n) or n for n in raw_enemy]
+            full_winner = (mongodb.resolve_commander_name(raw_winner) or raw_winner) if raw_winner else None
+
+            # Determine win/loss using the game record's own Deck relation.
             deck_notion_ids: list[str] = _parse_notion_prop(props.get("Deck", {})) or []  # type: ignore[assignment]
             john_deck = None
             for did in deck_notion_ids:
@@ -81,19 +85,34 @@ async def sync_game_history(slug: str, config: Config) -> dict:
                 if john_deck:
                     break
             john_commanders = {c["name"] for c in (john_deck or {}).get("commanders", [])}
-            won = any(winner.lower() in c.lower() for c in john_commanders) if winner else False
+            # Compare comma-stripped to handle both full Scryfall names and
+            # names already normalised for Notion (commas removed).
+            def _cmp(name: str) -> str:
+                return name.lower().replace(",", "")
+            won = any(_cmp(full_winner) in _cmp(c) for c in john_commanders) if full_winner else False
 
             record = {
                 "notion_id": game_id,
                 "deck_slug": slug,
                 "date": _parse_notion_prop(props.get("Date", {})),
-                "enemy_commanders": _parse_notion_prop(props.get("Enemy Commanders", {})) or [],
-                "winner": winner,
+                "enemy_commanders": full_enemy,
+                "winner": full_winner,
                 "won": won,
                 "notes": _parse_notion_prop(props.get("Notes", {})),
                 "synced_at": datetime.now(timezone.utc),
             }
             mongodb.upsert_game_record(record)
+
+            # Write comma-stripped full names back to Notion so the game page
+            # shows canonical names without the comma Notion disallows.
+            notion_enemy = [n.replace(",", "") for n in full_enemy]
+            notion_props: dict = {
+                "Enemy Commanders": {"multi_select": [{"name": n} for n in notion_enemy]},
+            }
+            if full_winner:
+                notion_props["Winner"] = {"select": {"name": full_winner.replace(",", "")}}
+            await update_page_properties(config.notion_mcp_url, game_id, notion_props)
+
             synced += 1
         except Exception as e:
             errors.append(f"{game_id}: {e}")
@@ -138,8 +157,8 @@ async def normalize_enemy_commanders(config: Config) -> dict:
     }, {"_id": 0}))
 
     def notion_name(full: str) -> str:
-        """Notion multi_select bans commas — use the first-name portion only."""
-        return full.split(",")[0]
+        """Notion multi_select bans commas — strip them entirely."""
+        return full.replace(",", "")
 
     updated = 0
     notion_errors: list[str] = []
@@ -153,7 +172,9 @@ async def normalize_enemy_commanders(config: Config) -> dict:
             record.get("deck_notion_id") or ""
         ) or mongodb.get_deck(record["deck_slug"])
         john_commanders = {c["name"] for c in (john_deck or {}).get("commanders", [])}
-        won = any(new_winner.lower() in c.lower() for c in john_commanders) if new_winner else False
+        def _cmp(name: str) -> str:
+            return name.lower().replace(",", "")
+        won = any(_cmp(new_winner) in _cmp(c) for c in john_commanders) if new_winner else False
 
         mongodb.upsert_game_record({**record, "enemy_commanders": new_enemy, "winner": new_winner, "won": won})
 
