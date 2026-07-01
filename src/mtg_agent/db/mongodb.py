@@ -41,6 +41,7 @@ def _create_index(coll: Collection, keys: list, **kwargs) -> None:
 def _ensure_indexes() -> None:
     db = get_db()
     _create_index(db["decks"], [("slug", ASCENDING)], unique=True)
+    _create_index(db["decks"], [("moxfield_id", ASCENDING)])
     _create_index(db["decks"], [("notion_id", ASCENDING)])
     _create_index(db["game_history"], [("notion_id", ASCENDING)], unique=True)
     _create_index(db["game_history"], [("deck_slug", ASCENDING)])
@@ -65,6 +66,10 @@ def get_deck(slug: str) -> dict[str, Any] | None:
 
 def get_deck_by_notion_id(notion_id: str) -> dict[str, Any] | None:
     return decks().find_one({"notion_id": notion_id}, {"_id": 0})
+
+
+def get_deck_by_moxfield_id(moxfield_id: str) -> dict[str, Any] | None:
+    return decks().find_one({"moxfield_id": moxfield_id}, {"_id": 0})
 
 
 def upsert_game_record(record: dict[str, Any]) -> None:
@@ -169,6 +174,15 @@ def get_printings(name: str) -> list[dict[str, Any]]:
 def get_printing_by_id(scryfall_id: str) -> dict[str, Any] | None:
     """Look up a specific printing by Scryfall card ID."""
     return get_db()["scryfall_bulk"].find_one({"id": scryfall_id}, {"_id": 0})
+
+
+def get_prices_by_scryfall_ids(scryfall_ids: list[str]) -> dict[str, dict]:
+    """Batch lookup prices from scryfall_bulk keyed by scryfall_id."""
+    docs = get_db()["scryfall_bulk"].find(
+        {"id": {"$in": scryfall_ids}},
+        {"_id": 0, "id": 1, "prices": 1},
+    )
+    return {d["id"]: d.get("prices", {}) for d in docs}
 
 
 def get_card_rulings(oracle_id: str) -> list[dict[str, Any]]:

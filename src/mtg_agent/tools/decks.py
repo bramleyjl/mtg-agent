@@ -8,7 +8,7 @@ from mtg_agent.clients import moxfield, scryfall
 from mtg_agent.clients.notion_mcp import fetch_page, update_deck_page, update_page_properties
 from mtg_agent.config import Config
 from mtg_agent.db import mongodb
-from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id
+from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id, get_prices_by_scryfall_ids
 
 
 def _parse_notion_prop(prop: dict) -> object:
@@ -262,17 +262,19 @@ async def list_decks(config: Config) -> list[dict]:
 
 
 def _slim_card(entry: dict) -> dict:
-    """Strip full Scryfall data from a card entry, keeping only name and oracle_id."""
+    """Strip full Scryfall data from a card entry, keeping name, oracle_id, and tags."""
     result: dict = {"name": entry["name"]}
     oracle_id = entry.get("scryfall", {}).get("oracle_id")
     if oracle_id:
         result["oracle_id"] = oracle_id
+    if entry.get("tags"):
+        result["tags"] = entry["tags"]
     return result
 
 
 def _slim_deck(stored: dict) -> dict:
     """Return top-level deck properties and card names/oracle_ids only."""
-    return {
+    result: dict = {
         "slug": stored.get("slug"),
         "name": stored.get("name"),
         "title": stored.get("title"),
@@ -286,6 +288,13 @@ def _slim_deck(stored: dict) -> dict:
         "commanders": [_slim_card(c) for c in stored.get("commanders", [])],
         "mainboard": [_slim_card(c) for c in stored.get("mainboard", [])],
     }
+    if stored.get("stats"):
+        result["stats"] = stored["stats"]
+    if stored.get("maybeboard"):
+        result["maybeboard"] = [_slim_card(c) for c in stored["maybeboard"]]
+    if stored.get("description"):
+        result["description"] = stored["description"]
+    return result
 
 
 async def get_deck(slug: str, config: Config) -> dict | None:
@@ -347,34 +356,41 @@ def _update_decks_yaml(decks_path: str, slug: str, name: str, title: str) -> Non
         yaml.dump(raw, f, allow_unicode=True, sort_keys=False)
 
 
-async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = None) -> dict:
+async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = None, moxfield_id: str | None = None) -> dict:
     """
     Fetch deck from Moxfield, enrich each card via Scryfall, store in MongoDB.
     Also updates decks.yaml and the Notion page with the current name/title from Moxfield.
     If prefetched_data is provided, skips the Moxfield fetch (used by the browser extension endpoint).
+    moxfield_id overrides the config value when the deck is not registered in decks.yaml.
     Returns a summary of what was synced.
     """
     deck_conf = config.decks_by_slug.get(slug)
-    if not deck_conf:
-        return {"error": f"Unknown deck slug: '{slug}'"}
+    effective_moxfield_id = moxfield_id or (deck_conf.moxfield_id if deck_conf else None)
+    if not effective_moxfield_id and not prefetched_data:
+        return {"error": f"No moxfield_id for slug '{slug}' and no prefetched data"}
 
-    deck_data = prefetched_data if prefetched_data is not None else await moxfield.fetch_deck(deck_conf.moxfield_id)
+    deck_data = prefetched_data if prefetched_data is not None else await moxfield.fetch_deck(effective_moxfield_id)
 
-    moxfield_updated_at = deck_data.get("updatedAtUtc")
+    moxfield_updated_at = deck_data.get("lastUpdatedAtUtc")
     if moxfield_updated_at:
         stored = mongodb.get_deck(slug)
         if stored and stored.get("moxfield_updated_at") == moxfield_updated_at:
+            last_synced = stored.get("last_synced")
             return {
                 "skipped": slug,
                 "reason": "already up to date",
+                "name": stored.get("name", slug),
+                "title": stored.get("title", ""),
+                "card_count": len(stored.get("mainboard", [])),
                 "moxfield_updated_at": moxfield_updated_at,
-                "last_synced": stored.get("last_synced"),
+                "last_synced": last_synced.isoformat() if hasattr(last_synced, "isoformat") else last_synced,
             }
 
-    mox_name, mox_title = moxfield.parse_deck_name(deck_data.get("name", deck_conf.name))
-    commander_entries_raw, mainboard_entries_raw = moxfield.extract_card_list(deck_data)
+    mox_name, mox_title = moxfield.parse_deck_name(deck_data.get("name", slug))
+    deck_meta = moxfield.extract_deck_meta(deck_data)
+    commander_entries_raw, mainboard_entries_raw, maybeboard_entries_raw = moxfield.extract_card_list(deck_data)
 
-    all_entries = commander_entries_raw + mainboard_entries_raw
+    all_entries = commander_entries_raw + mainboard_entries_raw + maybeboard_entries_raw
     # Deduplicate by (scryfall_id or name) to avoid redundant lookups
     seen: set[str] = set()
     unique_entries: list[dict] = []
@@ -407,43 +423,91 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
 
     def build_entry(e: dict) -> dict:
         result = {"name": e["name"], "quantity": e["quantity"]}
-        if e["scryfall_id"]:
+        if e.get("scryfall_id"):
             result["scryfall_id"] = e["scryfall_id"]
         if e["name"] in enriched_cards:
             result["scryfall"] = enriched_cards[e["name"]]
+        if e.get("tags"):
+            result["tags"] = e["tags"]
+        if e.get("board"):
+            result["board"] = e["board"]
         return result
 
     commander_entries = [build_entry(e) for e in commander_entries_raw]
     mainboard = [build_entry(e) for e in mainboard_entries_raw]
+    maybeboard = [build_entry(e) for e in maybeboard_entries_raw]
 
-    mongodb.upsert_deck(slug, {
+    # Batch price lookup from scryfall_bulk using per-card printing IDs
+    all_scryfall_ids = [
+        e["scryfall_id"] for e in mainboard + commander_entries
+        if e.get("scryfall_id")
+    ]
+    prices_by_id = get_prices_by_scryfall_ids(all_scryfall_ids) if all_scryfall_ids else {}
+
+    def _usd(entry: dict) -> float | None:
+        p = prices_by_id.get(entry.get("scryfall_id", ""), {})
+        raw = p.get("usd") or p.get("usd_foil")
+        return float(raw) if raw else None
+
+    for entry in mainboard + commander_entries:
+        price = _usd(entry)
+        if price is not None:
+            entry["price_usd"] = price
+
+    total_price = round(sum(e["price_usd"] for e in mainboard + commander_entries if "price_usd" in e), 2)
+
+    stats = moxfield.compute_deck_stats(mainboard)
+    stats["price_usd_total"] = total_price
+
+    # Derive colors from commanders' color_identity when not in config
+    if deck_conf:
+        colors = deck_conf.colors
+    else:
+        color_set: set[str] = set()
+        for c in commander_entries:
+            for col in c.get("scryfall", {}).get("color_identity", []):
+                color_set.add(col)
+        colors = sorted(color_set) or None
+
+    doc: dict = {
         "slug": slug,
         "name": mox_name,
         "title": mox_title,
-        "moxfield_id": deck_conf.moxfield_id,
-        "notion_id": deck_conf.notion_id,
-        "colors": deck_conf.colors,
-        "bracket": deck_conf.bracket,
-        "notes": deck_conf.notes,
+        "moxfield_id": effective_moxfield_id,
+        "notion_id": deck_conf.notion_id if deck_conf else None,
+        "colors": colors,
+        # Config bracket overrides Moxfield's (allows manual correction); falls back to Moxfield's value
+        "bracket": (deck_conf.bracket if deck_conf else None) or deck_meta.get("bracket"),
+        "notes": deck_conf.notes if deck_conf else None,
         "moxfield_updated_at": moxfield_updated_at,
         "commanders": commander_entries,
         "mainboard": mainboard,
-    })
+        "maybeboard": maybeboard,
+        "stats": stats,
+        **{k: v for k, v in deck_meta.items() if v is not None and k != "bracket"},
+    }
+    mongodb.upsert_deck(slug, doc)
 
     update_results: dict = {}
 
-    try:
-        _update_decks_yaml(config.decks_path, slug, mox_name, mox_title)
-        update_results["decks_yaml"] = "updated"
-    except Exception as e:
-        update_results["decks_yaml"] = f"error: {e}"
-
-    if config.notion_mcp_url:
+    if deck_conf:
         try:
-            await update_deck_page(config.notion_mcp_url, deck_conf.notion_id, mox_name, mox_title)
+            _update_decks_yaml(config.decks_path, slug, mox_name, mox_title)
+            update_results["decks_yaml"] = "updated"
+        except Exception as e:
+            update_results["decks_yaml"] = f"error: {e}"
+    else:
+        update_results["decks_yaml"] = "skipped — deck not in decks.yaml"
+
+    notion_id = deck_conf.notion_id if deck_conf else None
+    if notion_id and config.notion_mcp_url:
+        try:
+            await update_deck_page(config.notion_mcp_url, notion_id, mox_name, mox_title)
             update_results["notion"] = "updated"
         except Exception as e:
             update_results["notion"] = f"error: {e}"
+    elif not notion_id:
+        update_results["notion"] = "skipped — no notion_id (deck not in decks.yaml)"
     else:
         update_results["notion"] = "skipped — NOTION_MCP_URL not set"
 

@@ -24,6 +24,7 @@
     }
     #status.success { color: #86efac; }
     #status.error { color: #fca5a5; }
+    #status.partial { color: #fde68a; }
     button {
       width: 100%;
       padding: 9px;
@@ -40,7 +41,7 @@
     details { margin-top: 14px; }
     summary { font-size: 11px; color: #64748b; cursor: pointer; user-select: none; }
     summary:hover { color: #94a3b8; }
-    .settings { margin-top: 8px; }
+    .settings { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
     .settings label { font-size: 11px; color: #64748b; display: block; margin-bottom: 4px; }
     .settings input {
       width: 100%;
@@ -57,12 +58,18 @@
 <body>
   <h1>MTG Agent Sync</h1>
   <div id="status">Checking page...</div>
-  <button id="syncBtn" disabled>Sync to Pangolin</button>
+  <button id="syncBtn" disabled>Sync Deck</button>
   <details>
     <summary>Settings</summary>
     <div class="settings">
-      <label for="serverUrl">Server URL</label>
-      <input id="serverUrl" type="text" placeholder="http://YOUR_SERVER_IP:8765">
+      <div>
+        <label for="serverUrl">Prod server (pangolin)</label>
+        <input id="serverUrl" type="text" placeholder="http://YOUR_SERVER_IP:8765">
+      </div>
+      <div>
+        <label for="localUrl">Local dev server (optional)</label>
+        <input id="localUrl" type="text" placeholder="http://localhost:8765">
+      </div>
     </div>
   </details>
   <script src="popup.js"></script>
