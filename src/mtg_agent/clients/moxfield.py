@@ -108,12 +108,14 @@ _COLOR_PIPS = {"W", "U", "B", "R", "G"}
 
 
 def _classify_type(type_line: str, card_faces: list | None = None, layout: str | None = None) -> str:
-    # Only treat as land via card_faces for modal_dfc (player chooses face at cast time).
-    # Transform cards flip conditionally — front face type wins.
-    if layout == "modal_dfc" and card_faces:
-        for face in card_faces:
-            if "land" in (face.get("type_line") or "").lower():
+    if card_faces:
+        if layout == "modal_dfc":
+            # Player chooses face at cast time — land face is always available.
+            if any("land" in (f.get("type_line") or "").lower() for f in card_faces):
                 return "land"
+        elif layout == "transform":
+            # Flips conditionally — only the front face determines card type.
+            type_line = card_faces[0].get("type_line") or type_line
     tl = type_line.lower()
     if "land" in tl:
         return "land"
