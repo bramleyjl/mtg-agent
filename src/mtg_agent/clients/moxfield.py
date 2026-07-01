@@ -107,9 +107,10 @@ _PIP_RE = re.compile(r"\{([^}]+)\}")
 _COLOR_PIPS = {"W", "U", "B", "R", "G"}
 
 
-def _classify_type(type_line: str, card_faces: list | None = None) -> str:
-    # MDFCs: treat as land if any face is a land (land face is always playable as a land)
-    if card_faces:
+def _classify_type(type_line: str, card_faces: list | None = None, layout: str | None = None) -> str:
+    # Only treat as land via card_faces for modal_dfc (player chooses face at cast time).
+    # Transform cards flip conditionally — front face type wins.
+    if layout == "modal_dfc" and card_faces:
         for face in card_faces:
             if "land" in (face.get("type_line") or "").lower():
                 return "land"
@@ -159,7 +160,8 @@ def compute_deck_stats(card_entries: list[dict], land_count: int | None = None) 
         qty = entry.get("quantity", 1)
         type_line = scryfall.get("type_line", "")
         card_faces = scryfall.get("card_faces")
-        card_type = _classify_type(type_line, card_faces)
+        layout = scryfall.get("layout")
+        card_type = _classify_type(type_line, card_faces, layout)
         types[card_type] += qty
 
         cmc = scryfall.get("cmc", 0) or 0
