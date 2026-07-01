@@ -359,6 +359,17 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
     if moxfield_updated_at:
         stored = mongodb.get_deck(slug)
         if stored and stored.get("moxfield_updated_at") == moxfield_updated_at:
+            # Moxfield's own copy hasn't changed, so skip the network round-trip —
+            # but always recompute stats from the already-enriched mainboard we
+            # already have, since compute_deck_stats() itself can change (bug
+            # fixes) independent of whether the Moxfield list did. Without this,
+            # a stats fix would silently never apply to a deck until it happened
+            # to get edited on Moxfield again.
+            recomputed_stats = moxfield.compute_deck_stats(stored.get("mainboard", []))
+            recomputed_stats["price_usd_total"] = stored.get("stats", {}).get("price_usd_total", 0)
+            if recomputed_stats != stored.get("stats"):
+                mongodb.get_db()["decks"].update_one({"slug": slug}, {"$set": {"stats": recomputed_stats}})
+
             last_synced = stored.get("last_synced")
             return {
                 "skipped": slug,
