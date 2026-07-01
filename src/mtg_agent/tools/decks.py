@@ -1,8 +1,6 @@
 from datetime import datetime, timezone
-from pathlib import Path
 
 import httpx
-import yaml
 
 from mtg_agent.clients import moxfield, scryfall
 from mtg_agent.clients.notion_mcp import fetch_page, update_deck_page, update_page_properties
@@ -341,20 +339,6 @@ async def get_deck_full(slug: str, config: Config) -> dict | None:
     return result
 
 
-def _update_decks_yaml(decks_path: str, slug: str, name: str, title: str) -> None:
-    path = Path(decks_path)
-    with open(path) as f:
-        raw = yaml.safe_load(f)
-
-    for deck in raw["decks"]:
-        if deck["slug"] == slug:
-            deck["name"] = name
-            deck["title"] = title
-            break
-
-    with open(path, "w") as f:
-        yaml.dump(raw, f, allow_unicode=True, sort_keys=False)
-
 
 async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = None, moxfield_id: str | None = None) -> dict:
     """
@@ -490,14 +474,7 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
 
     update_results: dict = {}
 
-    if deck_conf:
-        try:
-            _update_decks_yaml(config.decks_path, slug, mox_name, mox_title)
-            update_results["decks_yaml"] = "updated"
-        except Exception as e:
-            update_results["decks_yaml"] = f"error: {e}"
-    else:
-        update_results["decks_yaml"] = "skipped — deck not in decks.yaml"
+    update_results["decks_yaml"] = "skipped — name/title stored in MongoDB"
 
     notion_id = deck_conf.notion_id if deck_conf else None
     if notion_id and config.notion_mcp_url:
