@@ -46,14 +46,24 @@ async function init() {
 }
 
 async function postToServer(url, moxfieldId, deckData) {
-  const res = await fetch(`${url}/sync-deck`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ moxfield_id: moxfieldId, deck_data: deckData }),
-  });
-  const result = await res.json();
-  if (!res.ok) throw new Error(result.error || String(res.status));
-  return result;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  try {
+    const res = await fetch(`${url}/sync-deck`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ moxfield_id: moxfieldId, deck_data: deckData }),
+      signal: controller.signal,
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || String(res.status));
+    return result;
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error("timed out after 60s");
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function syncDeck(slug) {
