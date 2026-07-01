@@ -4,7 +4,7 @@ import re
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from mtg_agent.clients.moxfield import parse_deck_name
 from mtg_agent.config import load_config
@@ -117,6 +117,16 @@ _CORS_HEADERS = {
 }
 
 
+def _json_response(data, status_code: int = 200) -> Response:
+    """Return a JSON response without a Content-Length header to avoid h11 mismatches on large payloads."""
+    body = json.dumps(data).encode()
+    return Response(
+        content=body,
+        status_code=status_code,
+        headers={**_CORS_HEADERS, "Content-Type": "application/json"},
+    )
+
+
 @mcp.custom_route("/sync-deck", methods=["POST", "OPTIONS"])
 async def http_sync_deck(request: Request) -> JSONResponse:
     """
@@ -125,18 +135,18 @@ async def http_sync_deck(request: Request) -> JSONResponse:
     Body: { "moxfield_id": "...", "deck_data": { ...Moxfield API response... } }
     """
     if request.method == "OPTIONS":
-        return JSONResponse(None, status_code=204, headers=_CORS_HEADERS)
+        return Response(status_code=204, headers=_CORS_HEADERS)
 
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse({"error": "Invalid JSON body"}, status_code=400, headers=_CORS_HEADERS)
+        return _json_response({"error": "Invalid JSON body"}, status_code=400)
 
     moxfield_id = body.get("moxfield_id")
     deck_data = body.get("deck_data")
 
     if not moxfield_id or not deck_data:
-        return JSONResponse({"error": "Missing moxfield_id or deck_data"}, status_code=400, headers=_CORS_HEADERS)
+        return _json_response({"error": "Missing moxfield_id or deck_data"}, status_code=400)
 
     # Resolve slug: config match → existing DB record → auto-generate from deck name
     config_deck = next((d for d in config.decks if d.moxfield_id == moxfield_id), None)
@@ -152,7 +162,7 @@ async def http_sync_deck(request: Request) -> JSONResponse:
 
     result = await decks.sync_deck(slug, config, prefetched_data=deck_data, moxfield_id=moxfield_id)
     status = 500 if "error" in result else 200
-    return JSONResponse(result, status_code=status, headers=_CORS_HEADERS)
+    return _json_response(result, status_code=status)
 
 
 def main() -> None:
