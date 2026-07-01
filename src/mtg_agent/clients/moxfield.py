@@ -177,8 +177,9 @@ def compute_deck_stats(card_entries: list[dict], land_count: int | None = None) 
         mana_cost = scryfall.get("mana_cost", "") or ""
         for sym in _PIP_RE.findall(mana_cost):
             sym_upper = sym.upper()
-            if sym_upper in _COLOR_PIPS:
-                pips[sym_upper] += qty
+            # Split handles both plain pips ("G" -> ["G"]) and hybrid ones
+            # ("B/G" -> ["B", "G"], counted toward both colors) uniformly —
+            # do not also match sym_upper itself, or plain pips double-count.
             for part in sym_upper.split("/"):
                 if part in _COLOR_PIPS:
                     pips[part] += qty
