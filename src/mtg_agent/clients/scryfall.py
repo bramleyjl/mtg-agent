@@ -10,10 +10,13 @@ _REQUEST_DELAY = 0.075
 
 ORACLE_FIELDS = {
     "oracle_id", "name", "mana_cost", "cmc", "type_line", "oracle_text",
-    "colors", "color_identity", "keywords", "legalities",
+    "colors", "color_identity", "keywords", "legalities", "game_changer",
     "power", "toughness", "loyalty", "produced_mana",
     "layout",       # modal_dfc vs transform — needed to distinguish unconditional MDFC lands
     "card_faces",   # for double-faced cards
+    "edhrec_rank",  # EDHREC popularity ranking
+    "all_parts",    # related tokens/meld pairs/other faces
+    "reserved",     # Reserved List status
 }
 
 PRINTING_FIELDS = {
@@ -21,7 +24,7 @@ PRINTING_FIELDS = {
     "rarity", "prices", "image_uris", "border_color", "frame",
     "frame_effects", "full_art", "promo", "reprint", "digital",
     "finishes", "lang", "released_at", "artist", "illustration_id",
-    "flavor_text",
+    "flavor_text", "set_type",
 }
 
 

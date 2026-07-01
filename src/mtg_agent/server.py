@@ -10,7 +10,7 @@ from mtg_agent.clients.moxfield import parse_deck_name
 from mtg_agent.config import load_config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import init_db
-from mtg_agent.tools import cards, decks
+from mtg_agent.tools import cards, decks, probability
 
 config = load_config()
 init_db(config.mongodb_uri, config.mongodb_db)
@@ -108,6 +108,165 @@ async def get_card(name: str) -> dict | None:
     """
     return await cards.get_card(name)
 
+
+@mcp.tool()
+async def calculate_draw_probability(
+    deck_size: int,
+    successes_in_deck: int,
+    sample_size: int,
+    min_successes: int = 1,
+) -> dict:
+    """
+    Hypergeometric draw probability for a card/category in a deck.
+
+    Example: "I run 10 ramp spells in a 99-card deck, what's the chance I've
+    drawn at least 1 by turn 3?" (multiplayer Commander, draw every turn) ->
+      deck_size=99, successes_in_deck=10, sample_size=10 (7 + 3 draws), min_successes=1
+    Use cards_seen_by_turn() to compute sample_size from a turn number.
+
+    Returns probability_exactly/at_least/at_most for min_successes.
+    """
+    return probability.hypergeometric_probability(
+        deck_size, successes_in_deck, sample_size, min_successes
+    )
+
+
+@mcp.tool()
+async def cards_seen_by_turn(turn: int, starting_hand: int = 7) -> int:
+    """
+    Cards seen by the end of a given turn's draw step. Commander is
+    multiplayer, so every player draws every turn including turn 1 (the
+    "skip first draw" rule only applies in two-player games). Feed the
+    result into calculate_draw_probability()'s sample_size.
+    """
+    return probability.cards_seen_by_turn(turn, starting_hand=starting_hand)
+
+
+@mcp.tool()
+async def get_comprehensive_rule(number: str) -> dict | None:
+    """
+    Look up a single Comprehensive Rules entry by rule number, e.g. "903.5c"
+    (a subrule), "903" (the Commander section header), or "9" (a top-level
+    section like "Casual Variants"). Use get_comprehensive_rules_section()
+    to browse all entries under a section, or get_rules_glossary_term() for
+    a defined term.
+    """
+    return mongodb.get_rule(number)
+
+
+@mcp.tool()
+async def get_comprehensive_rules_section(section: str) -> list[dict]:
+    """
+    Return all Comprehensive Rules entries under a top-level section (1-9),
+    e.g. "9" for Casual Variants (includes rule 903 "Commander").
+    """
+    return mongodb.get_rules_section(section)
+
+
+@mcp.tool()
+async def get_rules_glossary_term(term: str) -> dict | None:
+    """Look up a Comprehensive Rules glossary term's official definition (case-insensitive)."""
+    return mongodb.get_glossary_term(term)
+
+
+@mcp.tool()
+async def get_commander_banned_list() -> list[dict]:
+    """
+    Return the full official Commander banned list: individually named banned
+    cards plus blanket ban categories (e.g. all Conspiracy-type cards, all
+    "ante" cards). For whether one specific card is banned, prefer get_card()
+    — Scryfall's legalities.commander field is the source of truth for
+    per-card legality; this list is the reference text itself.
+    """
+    return mongodb.get_commander_banned_list()
+
+
+@mcp.tool()
+async def get_commander_brackets() -> list[dict]:
+    """Return the official Commander Brackets definitions: overview plus brackets 1 (Exhibition) through 5 (cEDH)."""
+    return mongodb.get_commander_brackets()
+
+
+@mcp.tool()
+async def get_commander_game_changers() -> list[dict]:
+    """
+    Return the full official Commander Game Changers list (53 cards, grouped
+    by color category). Game Changers aren't banned — legal everywhere, but
+    capped at 3 in Bracket 3 and unrestricted in Brackets 4-5, excluded from
+    Brackets 1-2. For whether one specific card is a Game Changer, prefer
+    get_card() — Scryfall's game_changer field is the source of truth for
+    per-card status; this list is the reference text itself.
+    """
+    return mongodb.get_game_changers()
+
+
+@mcp.tool()
+async def list_commander_bracket_announcements() -> list[dict]:
+    """
+    List the official Commander Format Panel announcements about the Brackets
+    system (title, date, author, url — no body text). Use
+    get_commander_bracket_announcement() with a url from this list to read
+    the full article, e.g. for WotC's stated reasoning behind a bracket change.
+    """
+    return mongodb.list_commander_bracket_announcements()
+
+
+@mcp.tool()
+async def get_commander_bracket_announcement(url: str) -> dict | None:
+    """Retrieve the full text of one Commander Bracket announcement by its url (from list_commander_bracket_announcements())."""
+    return mongodb.get_commander_bracket_announcement(url)
+
+
+@mcp.tool()
+async def list_commander_banr_announcements() -> list[dict]:
+    """
+    List the official Commander Banned & Restricted announcements (title,
+    date, author, url — no body text). Use get_commander_banr_announcement()
+    with a url from this list to read WotC's full stated reasoning for a
+    ban/unban or format-direction commentary. Only covers announcements from
+    when WotC took over B&R from the Rules Committee (2024 onward).
+    """
+    return mongodb.list_commander_banr_announcements()
+
+
+@mcp.tool()
+async def get_commander_banr_announcement(url: str) -> dict | None:
+    """Retrieve the full text of one Commander Banned & Restricted announcement by its url (from list_commander_banr_announcements())."""
+    return mongodb.get_commander_banr_announcement(url)
+
+
+@mcp.tool()
+async def search_wotc_announcements(query: str, category: str = "") -> list[dict]:
+    """
+    Keyword search over chunked WotC announcement text (Bracket and Banned &
+    Restricted announcements) — use this instead of pulling a full article
+    with get_commander_bracket_announcement()/get_commander_banr_announcement()
+    when you just need the relevant paragraph(s), e.g. "why was Nadu banned"
+    or "WotC's reasoning on the Lutri companion restriction."
+
+    Returns matching chunks (source title, url, text) ranked by relevance.
+    Pass category="commander_bracket_announcements" or
+    category="commander_banr_announcements" to filter to one source; omit
+    to search across both.
+    """
+    return mongodb.search_content_chunks(query, category=category or None)
+
+
+@mcp.tool()
+async def search_comprehensive_rules(query: str) -> list[dict]:
+    """
+    Keyword search over the Comprehensive Rules by content, for when you
+    don't know the exact rule number — e.g. "commander tax" or "state-based
+    actions." Returns matching rules ranked by relevance. Use
+    get_comprehensive_rule() once you have the specific number.
+    """
+    return mongodb.search_rules(query)
+
+
+@mcp.tool()
+async def search_rules_glossary(query: str) -> list[dict]:
+    """Keyword search over Comprehensive Rules glossary terms/definitions by content."""
+    return mongodb.search_glossary(query)
 
 
 _CORS_HEADERS = {
