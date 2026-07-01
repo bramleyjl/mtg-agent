@@ -2,7 +2,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from pymongo import MongoClient, ASCENDING
+from pymongo import MongoClient, ASCENDING, TEXT
 from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import OperationFailure
@@ -53,6 +53,21 @@ def _ensure_indexes() -> None:
     _create_index(db["scryfall_bulk"], [("oracle_id", ASCENDING)])
     _create_index(db["scryfall_oracle_tags"], [("id", ASCENDING)], unique=True)
     _create_index(db["scryfall_rulings"], [("oracle_id", ASCENDING)], unique=True)
+    _create_index(db["rules_numbered"], [("number", ASCENDING)], unique=True)
+    _create_index(db["rules_numbered"], [("section", ASCENDING)])
+    _create_index(db["rules_glossary"], [("term", ASCENDING)], unique=True)
+    _create_index(db["commander_banned_list"], [("name", ASCENDING)], unique=True)
+    _create_index(db["commander_brackets"], [("number", ASCENDING)], unique=True)
+    _create_index(db["commander_game_changers"], [("name", ASCENDING)], unique=True)
+    _create_index(db["commander_bracket_announcements"], [("url", ASCENDING)], unique=True)
+    _create_index(db["commander_banr_announcements"], [("url", ASCENDING)], unique=True)
+    # Structured-document tier: already atomic at ingestion, just full-text-index in place.
+    _create_index(db["rules_numbered"], [("title", TEXT), ("text", TEXT)])
+    _create_index(db["rules_glossary"], [("term", TEXT), ("definition", TEXT)])
+    # Article tier: shared chunk store for long-form prose (announcements, future primers).
+    _create_index(db["content_chunks"], [("source_url", ASCENDING)])
+    _create_index(db["content_chunks"], [("category", ASCENDING)])
+    _create_index(db["content_chunks"], [("title", TEXT), ("text", TEXT)])
 
 
 def upsert_deck(slug: str, data: dict[str, Any]) -> None:
@@ -194,3 +209,120 @@ def get_card_rulings(oracle_id: str) -> list[dict[str, Any]]:
 def get_card_oracle_tags(oracle_id: str) -> dict[str, Any] | None:
     """Return Scryfall oracle tag entry for a card by oracle_id."""
     return get_db()["scryfall_oracle_tags"].find_one({"oracle_id": oracle_id}, {"_id": 0})
+
+
+def get_rule(number: str) -> dict[str, Any] | None:
+    """Look up a single Comprehensive Rules entry by its rule number (e.g. '903.5c')."""
+    return get_db()["rules_numbered"].find_one({"number": number}, {"_id": 0})
+
+
+def get_rules_section(section: str) -> list[dict[str, Any]]:
+    """Return all Comprehensive Rules entries under a top-level section (e.g. '9' for Additional Rules)."""
+    return list(get_db()["rules_numbered"].find(
+        {"section": section}, {"_id": 0}, sort=[("number", ASCENDING)]
+    ))
+
+
+def get_glossary_term(term: str) -> dict[str, Any] | None:
+    """Look up a Comprehensive Rules glossary entry by term (case-insensitive)."""
+    return get_db()["rules_glossary"].find_one(
+        {"term": re.compile(f"^{re.escape(term)}$", re.IGNORECASE)}, {"_id": 0}
+    )
+
+
+def is_commander_banned(card_name: str) -> bool:
+    """Check whether a card is on the official Commander banned list by exact name."""
+    return get_db()["commander_banned_list"].find_one(
+        {"name": card_name, "type": "card"}, {"_id": 0}
+    ) is not None
+
+
+def get_commander_banned_list() -> list[dict[str, Any]]:
+    """Return the full official Commander banned list (named cards + blanket ban categories)."""
+    return list(get_db()["commander_banned_list"].find({}, {"_id": 0}))
+
+
+def get_commander_brackets() -> list[dict[str, Any]]:
+    """Return the official Commander Brackets definitions (overview + brackets 1-5)."""
+    return list(get_db()["commander_brackets"].find({}, {"_id": 0}, sort=[("number", ASCENDING)]))
+
+
+def is_game_changer(card_name: str) -> bool:
+    """Check whether a card is on the official Commander Game Changers list by exact name."""
+    return get_db()["commander_game_changers"].find_one({"name": card_name}, {"_id": 0}) is not None
+
+
+def get_game_changers() -> list[dict[str, Any]]:
+    """Return the full official Commander Game Changers list, with color category per card."""
+    return list(get_db()["commander_game_changers"].find({}, {"_id": 0}))
+
+
+def list_commander_bracket_announcements() -> list[dict[str, Any]]:
+    """List official Commander Format Panel Bracket announcements (metadata only, no body text), oldest first."""
+    return list(get_db()["commander_bracket_announcements"].find(
+        {}, {"_id": 0, "text": 0}, sort=[("published_date", ASCENDING)]
+    ))
+
+
+def get_commander_bracket_announcement(url: str) -> dict[str, Any] | None:
+    """Retrieve the full text of one Commander Bracket announcement by its URL."""
+    return get_db()["commander_bracket_announcements"].find_one({"url": url}, {"_id": 0})
+
+
+def list_commander_banr_announcements() -> list[dict[str, Any]]:
+    """List official Commander Banned & Restricted announcements (metadata only, no body text), oldest first."""
+    return list(get_db()["commander_banr_announcements"].find(
+        {}, {"_id": 0, "text": 0}, sort=[("published_date", ASCENDING)]
+    ))
+
+
+def get_commander_banr_announcement(url: str) -> dict[str, Any] | None:
+    """Retrieve the full text of one Commander Banned & Restricted announcement by its URL."""
+    return get_db()["commander_banr_announcements"].find_one({"url": url}, {"_id": 0})
+
+
+def replace_content_chunks(source_url: str, chunks: list[dict[str, Any]]) -> None:
+    """
+    Replace all chunks for a given source (article tier — see chunking.py).
+    Delete-then-insert rather than upsert, since re-ingestion may produce a
+    different number of chunks than last time.
+    """
+    db = get_db()
+    db["content_chunks"].delete_many({"source_url": source_url})
+    if chunks:
+        db["content_chunks"].insert_many(chunks)
+
+
+def search_content_chunks(query: str, category: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+    """
+    Keyword search over chunked long-form content (article tier: WotC
+    announcements, future primers). Optionally filter to one category
+    (e.g. "commander_bracket_announcements").
+    """
+    filter_: dict[str, Any] = {"$text": {"$search": query}}
+    if category:
+        filter_["category"] = category
+    return list(get_db()["content_chunks"].find(
+        filter_,
+        {"_id": 0, "score": {"$meta": "textScore"}},
+    ).sort([("score", {"$meta": "textScore"})]).limit(limit))
+
+
+def search_rules(query: str, limit: int = 10) -> list[dict[str, Any]]:
+    """
+    Keyword search over the Comprehensive Rules (structured-document tier —
+    already atomic per rule number, so this searches in place with no
+    separate chunk store).
+    """
+    return list(get_db()["rules_numbered"].find(
+        {"$text": {"$search": query}},
+        {"_id": 0, "score": {"$meta": "textScore"}},
+    ).sort([("score", {"$meta": "textScore"})]).limit(limit))
+
+
+def search_glossary(query: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Keyword search over the Comprehensive Rules glossary (structured-document tier)."""
+    return list(get_db()["rules_glossary"].find(
+        {"$text": {"$search": query}},
+        {"_id": 0, "score": {"$meta": "textScore"}},
+    ).sort([("score", {"$meta": "textScore"})]).limit(limit))
