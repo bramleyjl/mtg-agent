@@ -12,7 +12,8 @@ ORACLE_FIELDS = {
     "oracle_id", "name", "mana_cost", "cmc", "type_line", "oracle_text",
     "colors", "color_identity", "keywords", "legalities",
     "power", "toughness", "loyalty", "produced_mana",
-    "card_faces",  # for double-faced cards
+    "layout",       # modal_dfc vs transform — needed to distinguish unconditional MDFC lands
+    "card_faces",   # for double-faced cards
 }
 
 PRINTING_FIELDS = {
