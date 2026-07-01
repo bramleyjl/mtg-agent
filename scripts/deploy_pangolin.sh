@@ -9,11 +9,11 @@
 set -euo pipefail
 
 REMOTE="pangolin"
-REMOTE_DIR="/home/admin/mtg_agent"
+REMOTE_DIR="/home/admin/Projects/mcps/mtg-agent"
 
 echo "==> Syncing project to pangolin..."
 rsync -av --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
-    --exclude='.env' \
+    --exclude='.env' --exclude='.venv' \
     /home/john/Projects/mcps/mtg-agent/ "${REMOTE}:${REMOTE_DIR}/"
 
 echo "==> Installing Python dependencies..."
