@@ -107,7 +107,12 @@ _PIP_RE = re.compile(r"\{([^}]+)\}")
 _COLOR_PIPS = {"W", "U", "B", "R", "G"}
 
 
-def _classify_type(type_line: str) -> str:
+def _classify_type(type_line: str, card_faces: list | None = None) -> str:
+    # MDFCs: treat as land if any face is a land (land face is always playable as a land)
+    if card_faces:
+        for face in card_faces:
+            if "land" in (face.get("type_line") or "").lower():
+                return "land"
     tl = type_line.lower()
     if "land" in tl:
         return "land"
@@ -137,7 +142,8 @@ def _median(values: list[float]) -> float:
 def compute_deck_stats(card_entries: list[dict], land_count: int | None = None) -> dict:
     """
     Compute deck statistics from card entries that have been enriched with Scryfall data.
-    Excludes commanders (pass mainboard only).
+    Excludes commanders (pass mainboard only). Respects quantity for basic lands and
+    treats MDFCs with a land face as lands.
     """
     cmcs_no_land: list[float] = []
     cmcs_all: list[float] = []
@@ -150,29 +156,31 @@ def compute_deck_stats(card_entries: list[dict], land_count: int | None = None) 
         if not scryfall:
             continue
 
+        qty = entry.get("quantity", 1)
         type_line = scryfall.get("type_line", "")
-        card_type = _classify_type(type_line)
-        types[card_type] += 1
+        card_faces = scryfall.get("card_faces")
+        card_type = _classify_type(type_line, card_faces)
+        types[card_type] += qty
 
         cmc = scryfall.get("cmc", 0) or 0
-        cmcs_all.append(cmc)
+        cmcs_all.extend([cmc] * qty)
 
         if card_type != "land":
-            cmcs_no_land.append(cmc)
+            cmcs_no_land.extend([cmc] * qty)
             bucket = str(min(int(cmc), 7))  # 7+ grouped together
-            curve[bucket] += 1
+            curve[bucket] += qty
 
         mana_cost = scryfall.get("mana_cost", "") or ""
         for sym in _PIP_RE.findall(mana_cost):
             sym_upper = sym.upper()
             if sym_upper in _COLOR_PIPS:
-                pips[sym_upper] += 1
+                pips[sym_upper] += qty
             for part in sym_upper.split("/"):
                 if part in _COLOR_PIPS:
-                    pips[part] += 1
+                    pips[part] += qty
 
     n_lands = land_count if land_count is not None else types.get("land", 0)
-    deck_size = len(card_entries)
+    deck_size = sum(entry.get("quantity", 1) for entry in card_entries)
     avg_lands_in_hand = round(7 * n_lands / deck_size, 2) if deck_size else 0.0
 
     return {
