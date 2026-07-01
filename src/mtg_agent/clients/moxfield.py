@@ -169,7 +169,13 @@ def compute_deck_stats(card_entries: list[dict], land_count: int | None = None) 
         cmc = scryfall.get("cmc", 0) or 0
         cmcs_all.extend([cmc] * qty)
 
-        if card_type != "land":
+        # A card only truly has "no CMC" if it's a single-faced land — an MDFC/
+        # transform card classified as "land" (played as one when a land drop is
+        # needed) still has a real front-face mana value that matters wherever a
+        # library card's CMC is checked directly (e.g. Ad Nauseam revealing it
+        # deals damage equal to its mana value, same as any other spell would).
+        is_true_land = card_type == "land" and not card_faces
+        if not is_true_land:
             cmcs_no_land.extend([cmc] * qty)
             bucket = str(min(int(cmc), 7))  # 7+ grouped together
             curve[bucket] += qty
