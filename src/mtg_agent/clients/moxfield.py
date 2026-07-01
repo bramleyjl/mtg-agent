@@ -174,7 +174,12 @@ def compute_deck_stats(card_entries: list[dict], land_count: int | None = None) 
             bucket = str(min(int(cmc), 7))  # 7+ grouped together
             curve[bucket] += qty
 
-        mana_cost = scryfall.get("mana_cost", "") or ""
+        # Multi-faced cards (MDFC, transform) have no unified top-level mana_cost —
+        # only per-face. Pip counts should reflect the front-face casting cost
+        # regardless of type classification: an MDFC spell//land card is still
+        # classified "land" (it's played as one whenever a land drop is needed),
+        # but it does get cast as its spell face plenty, so its pips still count.
+        mana_cost = scryfall.get("mana_cost") or (card_faces[0].get("mana_cost", "") if card_faces else "") or ""
         for sym in _PIP_RE.findall(mana_cost):
             sym_upper = sym.upper()
             # Split handles both plain pips ("G" -> ["G"]) and hybrid ones
