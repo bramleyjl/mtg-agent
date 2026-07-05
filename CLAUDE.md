@@ -33,7 +33,7 @@ Three-tier default chunking strategy, chosen per source category rather than one
 
 **Scope boundary:** `content_chunks` is only for unstructured prose queried by "what does this say about X" — not a catch-all for every non-Scryfall source. Decklists (personal or the future "other people's decklists" CW source) are structured data queried by field (cards, quantities, commander, curve) and get their own schema'd collections, same as `decks` today — they never go through the chunking pipeline. The one partial exception: free-text `notes` inside structured `game_history` records could eventually feed `content_chunks` if they get long enough to need semantic search, while the rest of that record stays structured.
 
-Search today is MongoDB `$text` keyword search (self-hosted Community edition doesn't support `$vectorSearch`, which is Atlas-only). This is scaffolding, not final: see the RAG roadmap memory for the planned migration to embedding-based semantic search once the primer/CW-article corpus grows enough to need it — the `content_chunks` schema is designed so adding an `embedding` field later is additive, not a rewrite.
+Search today is MongoDB `$text` keyword search (self-hosted Community edition doesn't support `$vectorSearch`, which is Atlas-only). This is scaffolding, not final: see `docs/data_sources_roadmap.md` for the planned migration to embedding-based semantic search once the primer/CW-article corpus grows enough to need it — the `content_chunks` schema is designed so adding an `embedding` field later is additive, not a rewrite.
 
 ## Commander Format Rules
 
