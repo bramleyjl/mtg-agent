@@ -132,6 +132,80 @@ async def calculate_draw_probability(
 
 
 @mcp.tool()
+async def calculate_multivariate_draw_probability(
+    deck_size: int,
+    categories: list[dict],
+    sample_size: int,
+) -> dict:
+    """
+    Probability that several card categories are all satisfied simultaneously
+    in a single draw.
+
+    Example: "I run 37 lands and 10 removal spells in a 99-card deck, what's
+    the chance my opening hand has at least 2 lands AND at least 1 removal
+    spell?" ->
+      deck_size=99, sample_size=7, categories=[
+        {"name": "lands", "count_in_deck": 37, "min_needed": 2},
+        {"name": "removal", "count_in_deck": 10, "min_needed": 1},
+      ]
+
+    Returns probability_all_met.
+    """
+    return probability.multivariate_hypergeometric_probability(
+        deck_size, categories, sample_size
+    )
+
+
+@mcp.tool()
+async def calculate_mulligan_adjusted_probability(
+    deck_size: int,
+    successes_in_deck: int,
+    min_successes: int,
+    max_mulligans: int,
+    hand_size: int = 7,
+) -> dict:
+    """
+    Probability of reaching an acceptable hand within a London-mulligan
+    sequence (fresh hand_size-card draw per attempt, up to max_mulligans
+    mulligans).
+
+    Example: "I run 37 lands in a 99-card deck, what's the chance I have at
+    least 2 lands in hand if I'm willing to mulligan up to twice?" ->
+      deck_size=99, successes_in_deck=37, min_successes=2, max_mulligans=2
+
+    Returns single_hand_probability and probability_success_overall.
+    """
+    return probability.mulligan_adjusted_probability(
+        deck_size, successes_in_deck, min_successes, max_mulligans, hand_size=hand_size
+    )
+
+
+@mcp.tool()
+async def calculate_sources_needed(
+    deck_size: int,
+    sample_size: int,
+    min_successes: int,
+    target_probability: float,
+) -> dict:
+    """
+    Frank Karsten-style mana base question: how many sources of a color do
+    I need for a target probability by a given turn? Inverse of
+    calculate_draw_probability() — solves for the source count instead of
+    taking it as input.
+
+    Example: "In a 99-card deck, how many sources do I need to have at least
+    1 by turn 3 (10 cards seen) with 90% confidence?" ->
+      deck_size=99, sample_size=10, min_successes=1, target_probability=0.9
+
+    Returns sources_needed and achieved_probability (both None if
+    unreachable even with deck_size sources).
+    """
+    return probability.sources_needed_for_probability(
+        deck_size, sample_size, min_successes, target_probability
+    )
+
+
+@mcp.tool()
 async def cards_seen_by_turn(turn: int, starting_hand: int = 7) -> int:
     """
     Cards seen by the end of a given turn's draw step. Commander is
