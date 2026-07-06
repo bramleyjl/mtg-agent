@@ -26,13 +26,9 @@ Status legend: ✅ Live · 🔧 Partial · 📋 Planned
 
 | Source | Status | Collection(s) | HD part | CW part |
 |---|---|---|---|---|
-| Match/game history | ✅ Live, 🔧 known gap | `game_history` | Wins/losses, structured outcome fields — feeds win-rate/enemy-commander stats | Free-text `notes` per game are a soft, subjective indicator of what happened/how it felt — candidate for the `content_chunks` semantic layer later per `CLAUDE.md`'s partial-exception note |
+| Match/game history | ✅ Live | `game_history` | Wins/losses, structured outcome fields — feeds win-rate/enemy-commander stats | Free-text `notes` per game are a soft, subjective indicator of what happened/how it felt — candidate for the `content_chunks` semantic layer later per `CLAUDE.md`'s partial-exception note |
 
-**Known gap: past commanders per deck.** `_sync_game_history`/`get_deck` in `tools/decks.py` determines a game's `won` value by matching the winner's commander name against `john_deck["commanders"]` — but that field only reflects the deck's **current** Moxfield commander(s). A deck like Atemsis that used to be built around a different commander (e.g. Eluge) has historical `game_history` records where the winner field is the old commander name — those records will silently mismatch against today's commander list and get miscounted in win-rate calculations.
-
-Fix needs two parts:
-1. **A new structured data category for past commanders**, most likely added to each deck's Notion page (Notion is the canonical structured-data source per `CLAUDE.md`, synced into MongoDB `decks` the same way `commanders` is today) — e.g. a `past_commanders` list, without needing precise date ranges, just the full historical set of commander names this deck slug has ever been played under.
-2. **Win-rate/`won` logic update** in `tools/decks.py` to match a game's winner against `john_commanders ∪ past_commanders` for that deck, not just the current commander list.
+**Past-commander gap — ✅ resolved 2026-07-06.** Added a "Previous Commanders" multi-select property to the Notion EDH database (populated for Atemsis, Ephara, Glarb, Rem Karolus so far). `sync_game_history` in `tools/decks.py` now pulls it into each deck's Mongo record as `past_commanders`, matches a game's winner against `john_commanders ∪ past_commanders` (bidirectional name-containment check, since past-commander entries are short informal names while `winner` stores full canonical Scryfall names), and **self-heals every existing `game_history` record for that deck on each sync** — so editing "Previous Commanders" in Notion, or a future commander swap, retroactively fixes historical win/loss classification without a manual backfill.
 
 Scoped, not yet implemented — needs a Notion page property decision (new field name/shape) before building.
 | Commander Brackets + Game Changers | ✅ Live | `commander_brackets`, `commander_game_changers` | The Game Changers list itself is a discrete, checkable card list | The bracket *definitions* are qualitative prose meant to be interpreted per-deck, not mechanically applied |
@@ -45,7 +41,17 @@ These two announcement feeds are the **only** WotC announcement sources ingested
 
 | Source | Status | Collection(s) | Notes |
 |---|---|---|---|
-| Commander Spellbook | 📋 Planned | new collection(s), TBD | **The planned HD→CW bridge source.** Two distinct data shapes in one API: (1) combo pieces/steps/results — structured, objective, HD-like (a combo either works or it doesn't); (2) "run in X% of decks with commander Y" usage-frequency stats per card — aggregated community behavior, CW-like, and the same shape EDHREC's synergy data will eventually provide. Calls for a **shared usage-frequency library** (card × commander → play-rate/inclusion-% records) that both Spellbook and the future EDHREC ingestion populate, rather than building this twice. HD side scoped below; CW/usage side still open. |
+| Commander Spellbook | ✅ Live, MVP-complete (HD/combo side) · 📋 Planned (CW/usage-frequency side) | `commander_combos`, `commander_spellbook_templates` | **The planned HD→CW bridge source.** Two distinct data shapes in one API: (1) combo pieces/steps/results — structured, objective, HD-like (a combo either works or it doesn't); (2) "run in X% of decks with commander Y" usage-frequency stats per card — aggregated community behavior, CW-like, and the same shape EDHREC's synergy data will eventually provide. Calls for a **shared usage-frequency library** (card × commander → play-rate/inclusion-% records) that both Spellbook and the future EDHREC ingestion populate, rather than building this twice. HD side implemented (below); CW/usage side still open. |
+
+### Commander Spellbook — HD side (combo data) — ✅ MVP-complete 2026-07-06
+
+`refresh_commander_spellbook.py`, daily cron (9am slot), two independent staleness clocks:
+- **Combos** (`commander_combos`) — gated on the **remote** bulk file's `Last-Modified` header (not local data age — see `CLAUDE.md` step 9). 95,430+ commander-legal variants, one document per variant, schema as scoped below.
+- **Templates** (`commander_spellbook_templates`) — some combo pieces are "variable" rather than a specific card (e.g. "any creature with Persist or Undying," an "Impact Tremors"-type damage-on-cast effect). All 167 of Commander Spellbook's generic template categories are resolved to the concrete set of commander-legal oracle_ids that satisfy each one, via Scryfall (each template ships its own ready-made `scryfallApi` search URL). Gated on a 7-day local window, but **incrementally**: a template already resolved only re-queries Scryfall for cards released since its last resolve (plus a 3-day overlap buffer) and unions the result into what's stored — not a full re-query of its entire matching card pool. Only a brand-new template, or one whose query text changed upstream, gets a full resolve. This is what makes weekly cron runs take seconds instead of the ~15 minutes the initial full resolve of all 167 templates took.
+
+**`find_combos_in_deck(slug)`** — live MCP tool (`tools/combos.py`) cross-referencing a deck's current cards against both `uses` (exact oracle_id matches) and `requires` (satisfied if the deck owns any card in the matching template's resolved oracle_ids) — the "one or more variable pieces" resolution originally deferred is now built. Validated against real decks: Breya (dedicated combo deck) returns 23 combos; all three bracket-4 decks (Ruric Thar, Kykar, Karlov) confirmed to have at least one infinite. Flags `commander_zone_violations` when a `must_be_commander` piece is present in the deck but not actually the commander (surfaced, not excluded — see the tool's docstring).
+
+The CW/usage-frequency half (shared library, EDHREC integration) is still open — see "Open questions" below.
 
 ### Commander Spellbook — HD side (combo data) scoping
 
@@ -73,7 +79,7 @@ Key facts that shape ingestion:
 - **A "variant" is a specific card-for-card combo instance.** `requires` holds generic template slots (e.g. "any permanent castable for {C}") rather than concrete cards — a real decklist check needs to resolve which of *its own* cards satisfy each template, not just match on `uses`.
 - **`popularity` is literally EDHREC deck-inclusion counts** (confirmed via syntax guide's `popularity`/`pop`/`deck`/`decks` operator description) — this is combo-level popularity, not the per-card "X% of decks with commander Y" granularity from the original ask, but it's adjacent enough to feed the shared usage-frequency library later.
 - **`prices` (TCGPlayer/Cardmarket/Card Kingdom)** is market data — out of scope for this project (no financial/collection angle), recommend dropping on ingestion.
-- Related discovery: `commanderspellbook.com/find-my-combos/` is their own "paste a decklist, see which combos you already have" feature — validates that this cross-referencing use case is exactly what our future `find_combos_in_deck()` tool should do. `commanderspellbook.com/syntax-guide/` documents the full query grammar (`card:`, `coloridentity:`, `template:`, `results:`, `is:tag`, etc.) which is worth keeping as a reference for later filtering/search features, even though it's not used for ingestion (see below).
+- Related discovery: `commanderspellbook.com/find-my-combos/` is their own "paste a decklist, see which combos you already have" feature — validated that this cross-referencing use case is exactly what `find_combos_in_deck()` now does. `commanderspellbook.com/syntax-guide/` documents the full query grammar (`card:`, `coloridentity:`, `template:`, `results:`, `is:tag`, etc.) which is worth keeping as a reference for later filtering/search features, even though it's not used for ingestion (see below).
 
 **Ingestion mechanics — bulk file, not paginated REST crawl.** Commander Spellbook publishes a full bulk export at `https://json.commanderspellbook.com/variants.json` (S3/CloudFront-hosted, confirmed 546MB as of 2026-07-05), structured exactly like a Scryfall bulk file:
 
@@ -87,7 +93,7 @@ This is a better fit than the paginated `/variants/` REST endpoint (which is all
 
 **Scope decision: ingest all `legalities.commander == true` variants**, not narrowed to John's current decks' color identities. The bulk download cost is fixed regardless of how much gets filtered in, and storing the full commander-legal corpus means it's already there for any future deck/commander without re-ingestion.
 
-**Template decision: store `requires` template slots as-is (`template_id`/`template_name`, verbatim from the API), resolve later.** The "which of my actual cards satisfies this generic template" logic is deferred to when `find_combos_in_deck()` gets built — ingestion just needs to preserve the raw template reference now.
+**Template decision: store `requires` template slots as-is (`template_id`/`template_name`, verbatim from the API), resolve separately.** ~~The "which of my actual cards satisfies this generic template" logic is deferred to when `find_combos_in_deck()` gets built~~ — done. See the "MVP-complete" section above: templates resolve to concrete oracle_ids in their own `commander_spellbook_templates` collection, and `find_combos_in_deck()` is a live tool.
 
 **Proposed schema** — new collection `commander_combos`, one document per variant:
 
@@ -137,7 +143,6 @@ All CW prose ends up chunked small for RAG regardless of origin, but the top-lev
 - **Long-form vs short-form as a schema concept**: does this become a literal `content_type` field on `content_chunks` (orthogonal to `category`), or is it purely a documentation-level grouping? If it's a real field, the existing `chunk_text()` tier (`article`) maps to `long_form`; short-form sources may not need `chunk_text()`'s min/max-char merge logic at all (a single Discord message or game recap is already "one chunk") — possibly a 4th chunking tier that's mostly a pass-through with light concatenation by thread/session.
 
 - **Usage-frequency shared library**: what's the common schema for "card X run in Y% of decks with commander Z" records so Commander Spellbook and (later) EDHREC both write into it instead of duplicating the concept? Likely shape: `{card, commander, inclusion_pct, sample_size, source, last_synced}`. Needs a home — new collection (e.g. `card_usage_stats`) rather than `content_chunks`, since it's structured, not prose.
-- Does Commander Spellbook's combo-piece data (HD half) get its own collection, or fold into an existing one (`content_chunks` doesn't fit — it's structured, not prose)?
 - How to actually capture the "personal preference corpus" — does this need a lightweight in-session flagging mechanism (agent notices a stated preference and writes it), or a periodic pass over chat history?
 - Where's the line between "EDHREC synergy data" and "other people's decklists" when EDHREC recs are themselves derived from aggregated decklists? (Commander Spellbook's usage stats sharpen this question rather than resolve it.)
 - Priority order for the planned CW sources (Commander Spellbook / personal preference corpus / EDHREC / other decklists / Commander's Herald / Reddit / Discord) — which unblocks the most useful agent behavior first?

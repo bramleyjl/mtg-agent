@@ -9,6 +9,20 @@ from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id, get_prices_by_scryfall_ids
 
 
+def _cmp(name: str) -> str:
+    return name.lower().replace(",", "")
+
+
+def _commander_matches(winner: str, commander_name: str) -> bool:
+    """
+    True if winner and commander_name refer to the same card. Checked both ways
+    since a full canonical Scryfall name and a short informal name (e.g. a deck's
+    "Previous Commanders" entry) may each be a substring of the other.
+    """
+    a, b = _cmp(winner), _cmp(commander_name)
+    return a in b or b in a
+
+
 def _parse_notion_prop(prop: dict) -> object:
     """Extract a plain Python value from a raw Notion API property dict."""
     ptype = prop.get("type")
@@ -55,6 +69,12 @@ async def sync_game_history(slug: str, config: Config) -> dict:
     edh_games_prop = deck_page.get("properties", {}).get("EDH Games", {})
     game_ids: list[str] = _parse_notion_prop(edh_games_prop) or []  # type: ignore[assignment]
 
+    # "Previous Commanders" tracks a deck's full historical commander set, so that
+    # games won under a commander this deck no longer runs still count as wins.
+    raw_past: list[str] = _parse_notion_prop(deck_page.get("properties", {}).get("Previous Commanders", {})) or []  # type: ignore[assignment]
+    past_commanders = [mongodb.resolve_commander_name(n) or n for n in raw_past]
+    mongodb.get_db()["decks"].update_one({"slug": slug}, {"$set": {"past_commanders": past_commanders}})
+
     known_ids = mongodb.get_known_game_ids(slug)
     new_ids = [gid for gid in game_ids if gid not in known_ids]
 
@@ -83,11 +103,8 @@ async def sync_game_history(slug: str, config: Config) -> dict:
                 if john_deck:
                     break
             john_commanders = {c["name"] for c in (john_deck or {}).get("commanders", [])}
-            # Compare comma-stripped to handle both full Scryfall names and
-            # names already normalised for Notion (commas removed).
-            def _cmp(name: str) -> str:
-                return name.lower().replace(",", "")
-            won = any(_cmp(full_winner) in _cmp(c) for c in john_commanders) if full_winner else False
+            john_commanders |= set((john_deck or {}).get("past_commanders", []))
+            won = any(_commander_matches(full_winner, c) for c in john_commanders) if full_winner else False
 
             record = {
                 "notion_id": game_id,
@@ -115,7 +132,25 @@ async def sync_game_history(slug: str, config: Config) -> dict:
         except Exception as e:
             errors.append(f"{game_id}: {e}")
 
+    # Self-heal: recompute `won` for every existing record of this deck against its
+    # current + previous commanders, so editing "Previous Commanders" in Notion (or a
+    # future commander swap) retroactively fixes historical win/loss classification
+    # without needing a manual backfill.
+    all_commander_names = {c["name"] for c in stored.get("commanders", [])} | set(past_commanders)
+    healed = 0
+    for rec in mongodb.get_game_history(slug):
+        if not rec.get("winner"):
+            continue
+        recomputed = any(_commander_matches(rec["winner"], c) for c in all_commander_names)
+        if recomputed != rec.get("won"):
+            mongodb.get_db()["game_history"].update_one(
+                {"notion_id": rec["notion_id"]}, {"$set": {"won": recomputed}}
+            )
+            healed += 1
+
     result: dict = {"slug": slug, "new": synced, "total": len(game_ids), "already_known": len(known_ids)}
+    if healed:
+        result["healed"] = healed
     if errors:
         result["errors"] = errors
     return result
@@ -170,9 +205,8 @@ async def normalize_enemy_commanders(config: Config) -> dict:
             record.get("deck_notion_id") or ""
         ) or mongodb.get_deck(record["deck_slug"])
         john_commanders = {c["name"] for c in (john_deck or {}).get("commanders", [])}
-        def _cmp(name: str) -> str:
-            return name.lower().replace(",", "")
-        won = any(_cmp(new_winner) in _cmp(c) for c in john_commanders) if new_winner else False
+        john_commanders |= set((john_deck or {}).get("past_commanders", []))
+        won = any(_commander_matches(new_winner, c) for c in john_commanders) if new_winner else False
 
         mongodb.upsert_game_record({**record, "enemy_commanders": new_enemy, "winner": new_winner, "won": won})
 

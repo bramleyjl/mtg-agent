@@ -2,10 +2,12 @@
 Download Scryfall bulk files and upsert into MongoDB.
 
 Manages four datasets:
-  oracle_cards  — one canonical entry per Oracle ID; primary card lookup collection
-  default_cards — every English printing; used for price, border, set, and art queries
-  rulings       — Oracle rulings per card (keyed by oracle_id)
-  oracle_tags   — EDHREC/Scryfall tagger data (functional tags per card)
+  oracle_cards  — one canonical entry per Oracle ID; primary card lookup collection (7-day staleness gate)
+  default_cards — every English printing; used for price, border, set, and art queries.
+                  Always refreshed under --if-stale, no gate — prices are guaranteed to
+                  differ every day, so a staleness check would never actually skip anything.
+  rulings       — Oracle rulings per card (keyed by oracle_id) (7-day staleness gate)
+  oracle_tags   — EDHREC/Scryfall tagger data (functional tags per card) (7-day staleness gate)
 
 Run all:           python -m mtg_agent.scripts.refresh_scryfall_bulk
 Specific dataset:  python -m mtg_agent.scripts.refresh_scryfall_bulk --datasets oracle_cards rulings
@@ -26,11 +28,18 @@ from mtg_agent.config import load_config
 from mtg_agent.db.mongodb import get_db, init_db
 
 BULK_LIST_URL = "https://api.scryfall.com/bulk-data"
-STALE_AFTER_DAYS = 7
 BATCH_SIZE = 500
 META_COLLECTION = "scryfall_bulk_meta"
 
 _TOKEN_LAYOUTS = {"token", "emblem", "double_faced_token", "art_series"}
+
+# default_cards (prices) is intentionally absent — it always refreshes under
+# --if-stale rather than being gated, since prices differ every day by definition.
+STALE_AFTER_DAYS = {
+    "oracle_cards": 7,
+    "rulings": 7,
+    "oracle_tags": 7,
+}
 
 DATASETS: dict[str, dict[str, Any]] = {
     "oracle_cards": {
@@ -69,7 +78,7 @@ def _is_stale(dataset: str) -> bool:
         return True
     # Stored timestamps are naive UTC; compare as naive to avoid offset mismatch
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    return last < now - timedelta(days=STALE_AFTER_DAYS)
+    return last < now - timedelta(days=STALE_AFTER_DAYS[dataset])
 
 
 
@@ -178,39 +187,23 @@ REFRESH_FNS = {
 }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--if-stale",
-        action="store_true",
-        help=f"Skip datasets that were refreshed within the last {STALE_AFTER_DAYS} days.",
-    )
-    parser.add_argument(
-        "--datasets",
-        nargs="+",
-        choices=list(DATASETS.keys()),
-        default=list(DATASETS.keys()),
-        help="Which datasets to refresh (default: all).",
-    )
-    args = parser.parse_args()
+def refresh(datasets: list[str] | None = None, force: bool = True) -> None:
+    """
+    Refresh the given datasets (default: all four). force=False skips any dataset
+    still within its staleness window, except default_cards which always refreshes.
+    """
+    datasets = datasets or list(DATASETS.keys())
 
-    config = load_config()
-    init_db(config.mongodb_uri, config.mongodb_db)
-
-    to_refresh = args.datasets
-    if args.if_stale:
-        to_refresh = [d for d in to_refresh if _is_stale(d)]
+    to_refresh = datasets
+    if not force:
+        to_refresh = [d for d in to_refresh if d == "default_cards" or _is_stale(d)]
         if not to_refresh:
             print("All datasets are fresh — nothing to refresh.", flush=True)
-            sys.exit(0)
+            return
         print(f"Stale datasets: {', '.join(to_refresh)}", flush=True)
 
     print("Fetching Scryfall bulk data index...", flush=True)
-    try:
-        uris = _fetch_bulk_uris()
-    except Exception as e:
-        print(f"Failed to fetch Scryfall bulk index: {e}", flush=True)
-        sys.exit(1)
+    uris = _fetch_bulk_uris()
 
     for dataset in to_refresh:
         if dataset not in uris:
@@ -228,6 +221,32 @@ def main() -> None:
             print(f"  Error refreshing {dataset}: {e}", flush=True)
 
     print("\nAll done.", flush=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--if-stale",
+        action="store_true",
+        help="Skip datasets still within their staleness window (see STALE_AFTER_DAYS). default_cards is always refreshed regardless.",
+    )
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        choices=list(DATASETS.keys()),
+        default=list(DATASETS.keys()),
+        help="Which datasets to refresh (default: all).",
+    )
+    args = parser.parse_args()
+
+    config = load_config()
+    init_db(config.mongodb_uri, config.mongodb_db)
+
+    try:
+        refresh(datasets=args.datasets, force=not args.if_stale)
+    except Exception as e:
+        print(f"Error refreshing Scryfall bulk data: {e}", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

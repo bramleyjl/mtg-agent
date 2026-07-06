@@ -61,6 +61,10 @@ def _ensure_indexes() -> None:
     _create_index(db["commander_game_changers"], [("name", ASCENDING)], unique=True)
     _create_index(db["commander_bracket_announcements"], [("url", ASCENDING)], unique=True)
     _create_index(db["commander_banr_announcements"], [("url", ASCENDING)], unique=True)
+    _create_index(db["commander_combos"], [("variant_id", ASCENDING)], unique=True)
+    _create_index(db["commander_combos"], [("uses.oracle_id", ASCENDING)])
+    _create_index(db["commander_spellbook_templates"], [("template_id", ASCENDING)], unique=True)
+    _create_index(db["commander_spellbook_templates"], [("oracle_ids", ASCENDING)])
     # Structured-document tier: already atomic at ingestion, just full-text-index in place.
     _create_index(db["rules_numbered"], [("title", TEXT), ("text", TEXT)])
     _create_index(db["rules_glossary"], [("term", TEXT), ("definition", TEXT)])

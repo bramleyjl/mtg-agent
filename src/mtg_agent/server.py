@@ -10,7 +10,7 @@ from mtg_agent.clients.moxfield import parse_deck_name
 from mtg_agent.config import load_config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import init_db
-from mtg_agent.tools import cards, decks, probability
+from mtg_agent.tools import cards, combos, data_sources, decks, probability
 
 config = load_config()
 init_db(config.mongodb_uri, config.mongodb_db)
@@ -82,6 +82,42 @@ async def get_enemy_commander_stats(deck_slug: str = "") -> list:
     """
     return mongodb.get_enemy_commander_stats(deck_slug or None)
 
+
+
+@mcp.tool()
+async def refresh_all_data_sources(force: bool = False) -> list[dict]:
+    """
+    Refresh every ingested data source (Scryfall bulk data, Comprehensive Rules,
+    Commander banned list, Commander Brackets/Game Changers, both WotC announcement
+    feeds, and Commander Spellbook combos + templates) in one call.
+
+    force=False (default) mirrors the nightly cron: each source only refreshes if
+    past its own staleness window, and most calls will report "fresh, nothing to do".
+    force=True refreshes everything unconditionally — use this at the start of a
+    session when you want guaranteed-fresh data. This can take several minutes
+    (Commander Spellbook's 167 templates alone take ~1-2 sec each to check).
+
+    Returns one entry per source: status (ok/error), and its own log output.
+    """
+    return await data_sources.refresh_all_data_sources(force=force)
+
+
+@mcp.tool()
+async def find_combos_in_deck(slug: str) -> dict:
+    """
+    Cross-reference a deck's current card list against ingested Commander Spellbook
+    combo data. A combo counts as found only if every specific card it needs is in
+    the deck, and every generic requirement (e.g. "any creature with Persist or
+    Undying") is satisfied by a card the deck actually runs — not just a name match.
+
+    Check each combo's commander_zone_violations field: a piece marked
+    "must be commander" only needs to be present somewhere in the deck to count as
+    found, so a non-null value means it's actually in the 99, not the command zone
+    — the combo as described won't function until that changes.
+
+    Returns combos sorted by popularity (EDHREC-derived inclusion count).
+    """
+    return await combos.find_combos_in_deck(slug, config)
 
 
 @mcp.tool()

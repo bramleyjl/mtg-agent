@@ -63,16 +63,17 @@ John's preferences, play style, and deck history are tracked in the memory syste
 - Scryfall API is free with no auth required; be respectful of rate limits (10 req/sec max, prefer bulk data downloads for large queries)
 - EDHREC has an unofficial API useful for commander-specific recommendations
 - Decklists can be imported from Moxfield/Archidekt export formats (plain text: `1 Card Name`)
+- **Every `scripts/refresh_*.py` ingestion script must expose a reusable `refresh(force: bool = False) -> None` function** (not logic inlined in `main()`), so it can be called in-process — not just invoked via `python -m`. `main()` should be a thin CLI wrapper around it (parse args, call `refresh(force=...)`). This is what lets `tools/data_sources.py`'s `refresh_all_data_sources()` MCP tool run every source's refresh in one call without shelling out. If a script manages multiple independently-stale things (see `refresh_commander_spellbook.py`'s `refresh()` for combos + separate `refresh_templates()` for templates), expose each as its own `refresh`-style function and register both in `tools/data_sources.py`'s `_SOURCES` list.
 
 ## Server Setup (pangolin)
 
 After deploying with `scripts/deploy_pangolin.sh`, do these one-time steps on the server:
 
-**1. Create `.env`** at `/home/admin/mtg_agent/.env`:
+**1. Create `.env`** at `/home/admin/Projects/mcps/mtg-agent/.env`:
 ```
 MONGODB_URI=mongodb://localhost:27017
 MONGODB_DB=mtg_agent
-DECKS_CONFIG=/home/admin/mtg_agent/decks.yaml
+DECKS_CONFIG=/home/admin/Projects/mcps/mtg-agent/decks.yaml
 NOTION_MCP_URL=http://localhost:8766/mcp
 MCP_TRANSPORT=streamable-http
 MCP_HOST=0.0.0.0
@@ -81,41 +82,32 @@ MCP_PORT=8765
 
 **2. Initial Scryfall bulk data load** (one-time, takes a few minutes):
 ```bash
-ssh pangolin 'cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk'
+ssh pangolin 'cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk'
 ```
 
-**3. Daily refresh cron job** — add to the `admin` user's crontab (`crontab -e` on pangolin):
-```
-0 3 * * * cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk --if-stale >> /tmp/scryfall_bulk_refresh.log 2>&1
-```
-This runs nightly at 3am and skips if data is less than 7 days old. Check logs at `/tmp/scryfall_bulk_refresh.log`.
+**3. Cron jobs** — add to the `admin` user's crontab (`crontab -e` on pangolin). Three lines cover six refresh scripts; each script still self-gates via `--if-stale` against its own staleness window, so a nightly trigger only does real work when something's actually due:
 
-**4. Comprehensive Rules refresh cron job** — same crontab, runs daily but the `--if-stale` flag internally gates on an 8-week (56 day) staleness window since the rules only change on set-release cadence:
 ```
-0 4 * * * cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_comprehensive_rules --if-stale >> /tmp/comprehensive_rules_refresh.log 2>&1
+0 3 * * * cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk --if-stale >> /tmp/scryfall_bulk_refresh.log 2>&1
+0 4 * * * cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_comprehensive_rules --if-stale >> /tmp/comprehensive_rules_refresh.log 2>&1 ; .venv/bin/python -m mtg_agent.scripts.refresh_commander_banlist --if-stale >> /tmp/commander_banlist_refresh.log 2>&1 ; .venv/bin/python -m mtg_agent.scripts.refresh_commander_brackets --if-stale >> /tmp/commander_brackets_refresh.log 2>&1 ; .venv/bin/python -m mtg_agent.scripts.refresh_commander_bracket_announcements --if-stale >> /tmp/commander_bracket_announcements_refresh.log 2>&1 ; .venv/bin/python -m mtg_agent.scripts.refresh_commander_banr_announcements --if-stale >> /tmp/commander_banr_announcements_refresh.log 2>&1
+0 9 * * * cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_commander_spellbook --if-stale >> /tmp/commander_spellbook_refresh.log 2>&1
 ```
-Downloads the current Comprehensive Rules `.txt` from wizards.com (re-derives the dated download link from the rules landing page each run, since the filename changes every update) and populates `rules_numbered` and `rules_glossary` in MongoDB. Run without `--if-stale` for a manual out-of-cycle update (e.g. after hearing about a rules change before the 8-week window is up).
 
-**5. Commander banned list refresh cron job** — same crontab, same 8-week gate:
-```
-0 5 * * * cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_commander_banlist --if-stale >> /tmp/commander_banlist_refresh.log 2>&1
-```
-Scrapes `magic.wizards.com/en/banned-restricted-list` and populates `commander_banned_list` (individually named banned cards + blanket-ban categories like Conspiracy-type or ante cards). This is a reference/audit source — Scryfall's own `legalities.commander` field already reflects these bans per card — so it exists for the authoritative list text itself, including the blanket categories that aren't individual card names. Run without `--if-stale` for a manual update.
+**3am — `refresh_scryfall_bulk`** manages four Scryfall datasets. `oracle_cards`, `rulings`, and `oracle_tags` gate on a 7-day staleness window (`STALE_AFTER_DAYS` in the script) since card text/tags only change on set-release cadence. `default_cards` (which carries `prices`, used for deck price totals) has **no gate at all** — it always refreshes under `--if-stale`, since prices are guaranteed to differ every single day and a staleness check would never actually skip anything. Populates `scryfall_oracle`, `scryfall_bulk`, `scryfall_rulings`, `scryfall_oracle_tags`. Logs at `/tmp/scryfall_bulk_refresh.log`.
 
-**6. Commander Brackets / Game Changers refresh cron job** — same crontab, same 8-week gate:
-```
-0 6 * * * cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_commander_brackets --if-stale >> /tmp/commander_brackets_refresh.log 2>&1
-```
-Scrapes `magic.wizards.com/en/formats/commander` (both live in the same page's embedded data blob) and populates `commander_brackets` (overview + 5 bracket definitions with full prose) and `commander_game_changers` (53 cards, keyed by name with color category). Note: this page is beta/actively revised by the Commander Format Panel, so it's the most likely of the three official sources to need a manual out-of-cycle run. Run without `--if-stale` for a manual update.
+**4am — five WotC-sourced scripts, chained with `;`** (so one failing doesn't block the others), all gated on an 8-week (56 day) staleness window since official Commander-format content only changes on set-release/announcement cadence:
+- `refresh_comprehensive_rules` — downloads the current Comprehensive Rules `.txt` (re-derives the dated download link from the rules landing page each run, since the filename changes every update), populates `rules_numbered`/`rules_glossary`.
+- `refresh_commander_banlist` — scrapes `magic.wizards.com/en/banned-restricted-list`, populates `commander_banned_list` (named cards + blanket-ban categories like Conspiracy-type or ante cards). Reference/audit source — Scryfall's own `legalities.commander` already reflects these bans per card.
+- `refresh_commander_brackets` — scrapes `magic.wizards.com/en/formats/commander`, populates `commander_brackets` (overview + 5 bracket definitions) and `commander_game_changers` (53 cards). This page is beta/actively revised by the Commander Format Panel, so it's the most likely of these five to need a manual out-of-cycle run.
+- `refresh_commander_bracket_announcements` — auto-discovers announcement URLs each run via WotC's filtered article search (`?search=Commander%20Bracket`) and re-fetches all of them into `commander_bracket_announcements`.
+- `refresh_commander_banr_announcements` — same auto-discovery pattern via `?search=Commander+Banned+and+Restricted`, populates `commander_banr_announcements` with WotC's stated *reasoning* per ban/unban. Only surfaces announcements from when WotC took over B&R from the Rules Committee (2024 onward) — intentional, not a gap.
 
-**7. Commander Bracket announcements refresh cron job** — same crontab, same 8-week gate:
-```
-0 7 * * * cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_commander_bracket_announcements --if-stale >> /tmp/commander_bracket_announcements_refresh.log 2>&1
-```
-Auto-discovers announcement URLs each run from WotC's own filtered article search (`magic.wizards.com/en/news/announcements?search=Commander%20Bracket`, confirmed server-side filtered) and re-fetches all of them into `commander_bracket_announcements` — cheap since there are only a handful. Unlike the initial hand-maintained-URL-list approach, this now genuinely needs periodic re-checking (to catch newly published announcements), even though each individual article's own content is frozen once live. Run without `--if-stale` for a manual update.
+Run any of the five without `--if-stale` for a manual out-of-cycle update (e.g. John usually hears about B&R changes same-day, well inside the 8-week window).
 
-**8. Commander Banned & Restricted announcements refresh cron job** — same crontab, same 8-week gate, same auto-discovery pattern:
-```
-0 8 * * * cd /home/admin/mtg_agent && .venv/bin/python -m mtg_agent.scripts.refresh_commander_banr_announcements --if-stale >> /tmp/commander_banr_announcements_refresh.log 2>&1
-```
-Auto-discovers via `magic.wizards.com/en/news/announcements?search=Commander+Banned+and+Restricted` and populates `commander_banr_announcements`. Unlike the plain banned-list scrape (step 6), these carry WotC's stated *reasoning* for each ban/unban and broader commentary on card classes or format direction. Only surfaces announcements from when WotC took over B&R from the Rules Committee (2024 onward) — intentional, not a gap. Run without `--if-stale` for a manual update; John usually hears about B&R changes same-day.
+**9am — `refresh_commander_spellbook`** manages two independently-staled things:
+- **Combos** (`refresh()`) — staleness checked against the **remote** bulk file's `Last-Modified` header, not local data age, since new combos track card releases rather than a calendar. Downloads the full `variants.json` bulk file from `json.commanderspellbook.com` (~550MB), filters to `legalities.commander == true`, populates `commander_combos` (~95k variants).
+- **Templates** (`refresh_templates()`) — some combo pieces are generic ("any creature with Persist or Undying") rather than a specific card; each of Commander Spellbook's 167 template categories is resolved to the concrete commander-legal oracle_ids satisfying it via Scryfall, stored in `commander_spellbook_templates`. Gated on a 7-day window, but incrementally: an already-resolved template only re-queries Scryfall for cards released since its last check (plus a 3-day overlap buffer) and unions the result — not a full re-resolve — so this stays fast on a weekly cadence even though the initial resolve of all 167 templates took ~15 minutes.
+
+Both `commander_combos` and `commander_spellbook_templates` feed `find_combos_in_deck(slug)`, an MCP tool that cross-references a deck's current cards against both exact-card and generic-template combo pieces. Run without `--if-stale` for a manual update.
+
+**On-demand refresh:** `refresh_all_data_sources(force: bool = False)` is an MCP tool that runs every source above in one call — `force=False` mirrors the cron (only refreshes what's actually stale), `force=True` refreshes everything unconditionally (budget a few minutes; the 167 Spellbook templates alone take ~1-2 sec each even on the incremental path). Use this at the start of a session when you want guaranteed-fresh data without waiting for the next cron run.
