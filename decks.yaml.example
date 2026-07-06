@@ -1,0 +1,117 @@
+decks:
+  - slug: breya
+    name: "Breya"
+    title: "姐姐"
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [W, U, B, R]
+    bracket: "3"
+    notes: "grindy eggs & recursive artifact value into artifact-based infinite combos"
+
+  - slug: ruric_thar
+    name: "Ruric Thar"
+    title: "Ponza"
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [G, R]
+    bracket: "4"
+    notes: "aggro punisher creatures + heavy reliance of Ruric Thar to stop combos; Kiki-Jiki combo finish"
+
+  - slug: titania
+    name: "Titania"
+    title: "Last Tree of Argoth"
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [G]
+    bracket: "3"
+    notes: "land-recursion hyper aggro"
+
+  - slug: rem_karolus
+    name: "Rem Karolus"
+    title: "We Burn Burn"
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [R, W]
+    bracket: "2.9"
+    notes: "earthquake control into spell/damage doubled burn finishers"
+
+  - slug: kokusho
+    name: "Kokusho"
+    title: ""
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [B]
+    bracket: "3"
+    notes: "all-in repeated reanimator on Kokusho"
+
+  - slug: glarb
+    name: "Glarb"
+    title: "One Big Turn"
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [U, G, B]
+    bracket: "2.9"
+    notes: "sultai big mana bullshit => theft"
+
+  - slug: niv_mizzet
+    name: "Niv-Mizzet"
+    title: ""
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [G, U, W, B, R]
+    bracket: "2.5"
+    notes: "5c goodstuff pile"
+
+  - slug: ephara
+    name: "Ephara"
+    title: "It's a Control Deck"
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [U, W]
+    bracket: "3"
+    notes: "token spam control"
+
+  - slug: kykar
+    name: "Kykar"
+    title: ""
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [R, W, U]
+    bracket: "4"
+    notes: "twin-esque control beats into combos"
+
+  - slug: feldon
+    name: "Feldon"
+    title: "Loran's Smile"
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [R]
+    bracket: "2"
+    notes: "mono-red reanimator/stompy"
+
+  - slug: atemsis
+    name: "Atemsis"
+    title: ""
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [U]
+    bracket: "2"
+    notes: "control + big blue card draw"
+
+  - slug: rith
+    name: "Rith"
+    title: "and the *N* Sap Boys"
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [G, W, R]
+    bracket: "2"
+    notes: "go-wide saproling kindred, 'low power'"
+
+  - slug: karlov
+    name: "Karlov"
+    title: ""
+    moxfield_id: "YOUR_MOXFIELD_ID"
+    notion_id: "YOUR_NOTION_PAGE_ID"
+    colors: [B, W]
+    bracket: "4"
+    notes: "hatebears + soul sisters voltron with plenty of interaction"
