@@ -30,7 +30,8 @@ Status legend: ✅ Live · 🔧 Partial · 📋 Planned
 
 **Past-commander gap — ✅ resolved 2026-07-06.** Added a "Previous Commanders" multi-select property to the Notion EDH database (populated for Atemsis, Ephara, Glarb, Rem Karolus so far). `sync_game_history` in `tools/decks.py` now pulls it into each deck's Mongo record as `past_commanders`, matches a game's winner against `john_commanders ∪ past_commanders` (bidirectional name-containment check, since past-commander entries are short informal names while `winner` stores full canonical Scryfall names), and **self-heals every existing `game_history` record for that deck on each sync** — so editing "Previous Commanders" in Notion, or a future commander swap, retroactively fixes historical win/loss classification without a manual backfill.
 
-Scoped, not yet implemented — needs a Notion page property decision (new field name/shape) before building.
+| Source | Status | Collection(s) | HD part | CW part |
+|---|---|---|---|---|
 | Commander Brackets + Game Changers | ✅ Live | `commander_brackets`, `commander_game_changers` | The Game Changers list itself is a discrete, checkable card list | The bracket *definitions* are qualitative prose meant to be interpreted per-deck, not mechanically applied |
 | Commander Bracket announcements | ✅ Live | `commander_bracket_announcements` | Official WotC source, timestamped and authoritative | Content is WotC's qualitative reasoning/guidance, requires interpretation same as bracket text |
 | Commander B&R announcements | ✅ Live | `commander_banr_announcements` | Official, dated ban/unban facts | Stated *reasoning* behind each decision is qualitative commentary on card classes/format direction |
