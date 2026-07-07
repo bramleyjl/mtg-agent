@@ -84,11 +84,17 @@ def _ensure_indexes() -> None:
     # Article tier: shared chunk store for long-form prose (announcements, future primers).
     _create_index(db["content_chunks"], [("source_url", ASCENDING)])
     _create_index(db["content_chunks"], [("category", ASCENDING)])
+    _create_index(db["content_chunks"], [("topic_tags", ASCENDING)])
     _create_index(db["content_chunks"], [("title", TEXT), ("text", TEXT)])
     # Short-form tier: atomic player-stated preferences, one document per statement.
     _create_index(db["player_preferences"], [("deck_slug", ASCENDING)])
     _create_index(db["player_preferences"], [("stated_at", ASCENDING)])
     _create_index(db["player_preferences"], [("text", TEXT)])
+    # Reference decklists: other people's Moxfield decks (e.g. linked from strategy
+    # articles), kept structured like `decks` but entirely separate — no slug, no
+    # Notion/decks.yaml involvement.
+    _create_index(db["reference_decklists"], [("moxfield_id", ASCENDING)], unique=True)
+    _create_index(db["reference_decklists"], [("source_url", ASCENDING)])
 
 
 def upsert_deck(slug: str, data: dict[str, Any]) -> None:
@@ -106,6 +112,17 @@ def get_deck_by_notion_id(notion_id: str) -> dict[str, Any] | None:
 
 def get_deck_by_moxfield_id(moxfield_id: str) -> dict[str, Any] | None:
     return decks().find_one({"moxfield_id": moxfield_id}, {"_id": 0})
+
+
+def upsert_reference_decklist(moxfield_id: str, data: dict[str, Any]) -> None:
+    data["last_synced"] = datetime.now(timezone.utc)
+    get_db()["reference_decklists"].update_one(
+        {"moxfield_id": moxfield_id}, {"$set": data}, upsert=True
+    )
+
+
+def get_reference_decklist(moxfield_id: str) -> dict[str, Any] | None:
+    return get_db()["reference_decklists"].find_one({"moxfield_id": moxfield_id}, {"_id": 0})
 
 
 def upsert_game_record(record: dict[str, Any]) -> None:
@@ -425,15 +442,26 @@ def replace_content_chunks(source_url: str, chunks: list[dict[str, Any]]) -> Non
         db["content_chunks"].insert_many(chunks)
 
 
-def search_content_chunks(query: str, category: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+def search_content_chunks(
+    query: str,
+    category: str | None = None,
+    topic_tags: list[str] | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
     """
     Keyword search over chunked long-form content (article tier: WotC
-    announcements, future primers). Optionally filter to one category
-    (e.g. "commander_bracket_announcements").
+    announcements, primers/strategy articles). Optionally filter to one category
+    (e.g. "commander_bracket_announcements") and/or by topic_tags (matches if a
+    chunk has any of the given tags) — topic_tags is the intended cross-archetype
+    retrieval axis for primer/strategy_article content (see tools/articles.py):
+    a primer's commander_names may not match the deck being discussed, but its
+    topic_tags (e.g. "damage-race-math") can still surface it.
     """
     filter_: dict[str, Any] = {"$text": {"$search": query}}
     if category:
         filter_["category"] = category
+    if topic_tags:
+        filter_["topic_tags"] = {"$in": topic_tags}
     return list(get_db()["content_chunks"].find(
         filter_,
         {"_id": 0, "score": {"$meta": "textScore"}},

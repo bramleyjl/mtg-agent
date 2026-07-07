@@ -424,48 +424,14 @@ async def get_deck_full(slug: str, config: Config) -> dict | None:
 
 
 
-async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = None, moxfield_id: str | None = None) -> dict:
+async def enrich_deck_cards(deck_data: dict) -> dict:
     """
-    Fetch deck from Moxfield, enrich each card via Scryfall, store in MongoDB.
-    Also updates decks.yaml and the Notion page with the current name/title from Moxfield.
-    If prefetched_data is provided, skips the Moxfield fetch (used by the browser extension endpoint).
-    moxfield_id overrides the config value when the deck is not registered in decks.yaml.
-    Returns a summary of what was synced.
+    Shared Moxfield-data → Scryfall-enriched-cards pipeline, used by both sync_deck()
+    (John's own decks) and sync_reference_deck() (other people's, e.g. decklists linked
+    from strategy articles). Returns name/title, deck-level meta, commander/mainboard/
+    maybeboard entries (enriched with Scryfall data, tags, prices), and computed stats.
     """
-    deck_conf = config.decks_by_slug.get(slug)
-    effective_moxfield_id = moxfield_id or (deck_conf.moxfield_id if deck_conf else None)
-    if not effective_moxfield_id and not prefetched_data:
-        return {"error": f"No moxfield_id for slug '{slug}' and no prefetched data"}
-
-    deck_data = prefetched_data if prefetched_data is not None else await moxfield.fetch_deck(effective_moxfield_id)
-
-    moxfield_updated_at = deck_data.get("lastUpdatedAtUtc")
-    if moxfield_updated_at:
-        stored = mongodb.get_deck(slug)
-        if stored and stored.get("moxfield_updated_at") == moxfield_updated_at:
-            # Moxfield's own copy hasn't changed, so skip the network round-trip —
-            # but always recompute stats from the already-enriched mainboard we
-            # already have, since compute_deck_stats() itself can change (bug
-            # fixes) independent of whether the Moxfield list did. Without this,
-            # a stats fix would silently never apply to a deck until it happened
-            # to get edited on Moxfield again.
-            recomputed_stats = moxfield.compute_deck_stats(stored.get("mainboard", []))
-            recomputed_stats["price_usd_total"] = stored.get("stats", {}).get("price_usd_total", 0)
-            if recomputed_stats != stored.get("stats"):
-                mongodb.get_db()["decks"].update_one({"slug": slug}, {"$set": {"stats": recomputed_stats}})
-
-            last_synced = stored.get("last_synced")
-            return {
-                "skipped": slug,
-                "reason": "already up to date",
-                "name": stored.get("name", slug),
-                "title": stored.get("title", ""),
-                "card_count": len(stored.get("mainboard", [])),
-                "moxfield_updated_at": moxfield_updated_at,
-                "last_synced": last_synced.isoformat() if hasattr(last_synced, "isoformat") else last_synced,
-            }
-
-    mox_name, mox_title = moxfield.parse_deck_name(deck_data.get("name", slug))
+    mox_name, mox_title = moxfield.parse_deck_name(deck_data.get("name", ""))
     deck_meta = moxfield.extract_deck_meta(deck_data)
     commander_entries_raw, mainboard_entries_raw, maybeboard_entries_raw = moxfield.extract_card_list(deck_data)
 
@@ -546,6 +512,72 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
 
     stats = moxfield.compute_deck_stats(mainboard)
     stats["price_usd_total"] = total_price
+
+    return {
+        "mox_name": mox_name,
+        "mox_title": mox_title,
+        "deck_meta": deck_meta,
+        "commander_entries_raw": commander_entries_raw,
+        "commander_entries": commander_entries,
+        "mainboard": mainboard,
+        "maybeboard": maybeboard,
+        "stats": stats,
+        "enriched_cards": enriched_cards,
+        "missing": missing,
+    }
+
+
+async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = None, moxfield_id: str | None = None) -> dict:
+    """
+    Fetch deck from Moxfield, enrich each card via Scryfall, store in MongoDB.
+    Also updates decks.yaml and the Notion page with the current name/title from Moxfield.
+    If prefetched_data is provided, skips the Moxfield fetch (used by the browser extension endpoint).
+    moxfield_id overrides the config value when the deck is not registered in decks.yaml.
+    Returns a summary of what was synced.
+    """
+    deck_conf = config.decks_by_slug.get(slug)
+    effective_moxfield_id = moxfield_id or (deck_conf.moxfield_id if deck_conf else None)
+    if not effective_moxfield_id and not prefetched_data:
+        return {"error": f"No moxfield_id for slug '{slug}' and no prefetched data"}
+
+    deck_data = prefetched_data if prefetched_data is not None else await moxfield.fetch_deck(effective_moxfield_id)
+
+    moxfield_updated_at = deck_data.get("lastUpdatedAtUtc")
+    if moxfield_updated_at:
+        stored = mongodb.get_deck(slug)
+        if stored and stored.get("moxfield_updated_at") == moxfield_updated_at:
+            # Moxfield's own copy hasn't changed, so skip the network round-trip —
+            # but always recompute stats from the already-enriched mainboard we
+            # already have, since compute_deck_stats() itself can change (bug
+            # fixes) independent of whether the Moxfield list did. Without this,
+            # a stats fix would silently never apply to a deck until it happened
+            # to get edited on Moxfield again.
+            recomputed_stats = moxfield.compute_deck_stats(stored.get("mainboard", []))
+            recomputed_stats["price_usd_total"] = stored.get("stats", {}).get("price_usd_total", 0)
+            if recomputed_stats != stored.get("stats"):
+                mongodb.get_db()["decks"].update_one({"slug": slug}, {"$set": {"stats": recomputed_stats}})
+
+            last_synced = stored.get("last_synced")
+            return {
+                "skipped": slug,
+                "reason": "already up to date",
+                "name": stored.get("name", slug),
+                "title": stored.get("title", ""),
+                "card_count": len(stored.get("mainboard", [])),
+                "moxfield_updated_at": moxfield_updated_at,
+                "last_synced": last_synced.isoformat() if hasattr(last_synced, "isoformat") else last_synced,
+            }
+
+    enriched = await enrich_deck_cards(deck_data)
+    mox_name, mox_title = enriched["mox_name"], enriched["mox_title"]
+    deck_meta = enriched["deck_meta"]
+    commander_entries_raw = enriched["commander_entries_raw"]
+    commander_entries = enriched["commander_entries"]
+    mainboard = enriched["mainboard"]
+    maybeboard = enriched["maybeboard"]
+    stats = enriched["stats"]
+    enriched_cards = enriched["enriched_cards"]
+    missing = enriched["missing"]
 
     # Derive colors from commanders' color_identity when not in config
     if deck_conf:

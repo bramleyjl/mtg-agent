@@ -20,6 +20,18 @@ async def fetch_deck(moxfield_id: str) -> dict:
         return response.json()
 
 
+def extract_owner_username(deck_data: dict) -> str | None:
+    """
+    Moxfield's authenticated deck response includes the deck creator under
+    createdByUser.userName. Used to distinguish John's own decks from reference
+    decks synced via the browser extension. Field name is unverified against a
+    live payload as of 2026-07-07 — Moxfield blocks unauthenticated/non-client
+    fetches, so this can only be confirmed the first time a real deck is synced.
+    """
+    owner = deck_data.get("createdByUser") or {}
+    return owner.get("userName") or owner.get("displayName") or None
+
+
 def parse_deck_name(raw_name: str) -> tuple[str, str]:
     """
     Moxfield deck names follow "Name - Title" format.

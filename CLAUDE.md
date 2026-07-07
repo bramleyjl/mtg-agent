@@ -35,6 +35,11 @@ Three-tier default chunking strategy, chosen per source category rather than one
 
 Search today is MongoDB `$text` keyword search (self-hosted Community edition doesn't support `$vectorSearch`, which is Atlas-only). This is scaffolding, not final: see `docs/data_sources_roadmap.md` for the planned migration to embedding-based semantic search once the primer/CW-article corpus grows enough to need it — the `content_chunks` schema is designed so adding an `embedding` field later is additive, not a rewrite.
 
+**Primer/strategy_article ingestion workflow (standard practice as of 2026-07-07):** these have no per-site scraper (unlike the WotC announcement pipeline) — ingestion is conversational, via `record_strategy_article()` (`tools/articles.py`). When John wants an external article ingested:
+- **WebFetch is fine for scouting** (e.g. finding decklists an article links) but runs pages through a smaller model rather than returning literal text — good enough to summarize, not to store as the source of truth.
+- **For actual ingestion, get verbatim text**: ask John for a PDF print of the page (or pasted raw text) and read that directly, rather than relying on WebFetch's paraphrase. This matters because direct quotes and precise phrasing are often exactly what makes a chunk worth surfacing later.
+- **Work out `title`, `commander_names`, and `topic_tags` collaboratively with John** rather than inferring them solo — `commander_names` is citation-only metadata (which decklist demonstrates the article's ideas), while `topic_tags` (free-form theory/concept tags, e.g. `damage-race-math`, `punish-over-engine`) is the actual cross-archetype retrieval axis and is worth getting right. See `docs/data_sources_roadmap.md`'s "strategy_article / primer" section for the full design rationale (the Wilson/Noble Heritage ↔ Rem Karolus example that motivated this).
+
 ## Commander Format Rules
 
 - 100-card singleton (exactly 1 copy of each card except basic lands)
@@ -78,7 +83,10 @@ NOTION_MCP_URL=http://localhost:8766/mcp
 MCP_TRANSPORT=streamable-http
 MCP_HOST=0.0.0.0
 MCP_PORT=8765
+MOXFIELD_USERNAME=<johns_moxfield_username>
 ```
+
+`MOXFIELD_USERNAME` is used by the `/sync-deck` HTTP endpoint (the browser extension's target) to decide whether a synced deck is John's own (`decks` collection) or a reference decklist belonging to someone else (`reference_decklists` collection) — see `docs/data_sources_roadmap.md`'s Reference decklists section.
 
 **2. Initial Scryfall bulk data load** (one-time, takes a few minutes):
 ```bash

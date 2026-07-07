@@ -6,11 +6,14 @@ from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from mtg_agent.clients.moxfield import parse_deck_name
+from mtg_agent.clients.moxfield import extract_owner_username, parse_deck_name
 from mtg_agent.config import load_config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import init_db
-from mtg_agent.tools import cards, combos, data_sources, decks, edhrec, preferences, probability, tags, theory
+from mtg_agent.tools import (
+    articles, cards, combos, data_sources, decks, edhrec, preferences, probability,
+    reference_decks, tags, theory,
+)
 
 config = load_config()
 init_db(config.mongodb_uri, config.mongodb_db)
@@ -123,6 +126,46 @@ async def record_player_theory(title: str, text: str) -> dict:
 async def search_player_theory(query: str) -> list[dict]:
     """Keyword search over recorded player-theory essays."""
     return await theory.search_player_theory(query)
+
+
+@mcp.tool()
+async def record_strategy_article(
+    url: str,
+    title: str,
+    text: str,
+    category: str = "strategy_article",
+    commander_names: list[str] | None = None,
+    topic_tags: list[str] | None = None,
+    published_date: str | None = None,
+) -> dict:
+    """
+    Record a long-form external article (a commander-specific primer, or a general
+    strategy piece) after fetching and cleaning its text yourself (e.g. via WebFetch —
+    no per-site scraper exists for this). Ingestion is conversational: title,
+    commander_names, and topic_tags should be worked out with John, not guessed.
+
+    category: "primer" (commander/archetype-specific) or "strategy_article" (general) —
+    bookkeeping only, doesn't affect search. commander_names is citation metadata (which
+    decklist(s) concretely demonstrate the article's ideas) — NOT a retrieval filter,
+    since a primer's generalizable theory often applies well beyond its literal
+    commander. topic_tags (free-form, e.g. "damage-race-math", "punish-over-engine")
+    is the actual cross-archetype retrieval mechanism — tag the underlying theories/
+    concepts, not just the commander, so this surfaces in unrelated deck conversations
+    where the same philosophy applies. Re-recording the same url replaces its prior
+    chunks. Always call out that you're saving an article when you do this.
+    """
+    return await articles.record_strategy_article(
+        url, title, text, category=category,
+        commander_names=commander_names, topic_tags=topic_tags, published_date=published_date,
+    )
+
+
+@mcp.tool()
+async def search_strategy_articles(
+    query: str, category: str = "", topic_tags: list[str] | None = None
+) -> list[dict]:
+    """Keyword search over recorded primers/strategy articles, optionally scoped by category and/or topic_tags."""
+    return await articles.search_strategy_articles(query, category=category or None, topic_tags=topic_tags)
 
 
 @mcp.tool()
@@ -549,7 +592,14 @@ async def http_sync_deck(request: Request) -> JSONResponse:
     """
     HTTP endpoint for the browser extension. Accepts pre-fetched Moxfield deck data
     so the extension can pass its authenticated response directly, bypassing the 403.
-    Body: { "moxfield_id": "...", "deck_data": { ...Moxfield API response... } }
+    Body: { "moxfield_id": "...", "deck_data": { ...Moxfield API response... }, "source_url": "..." (optional) }
+
+    Routes to one of two storage paths depending on who owns the deck:
+    - Already known to decks.yaml/DB as one of John's own → decks.sync_deck() (`decks` collection)
+    - Everything else → reference_decks.sync_reference_deck() (`reference_decklists` collection)
+    Ownership is decided by comparing the deck's createdByUser against MOXFIELD_USERNAME
+    (config.moxfield_username) — falls back to treating it as John's own deck if that env
+    var isn't set, preserving prior behavior until it's configured.
     """
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=_CORS_HEADERS)
@@ -561,12 +611,31 @@ async def http_sync_deck(request: Request) -> JSONResponse:
 
     moxfield_id = body.get("moxfield_id")
     deck_data = body.get("deck_data")
+    source_url = body.get("source_url") or None
 
     if not moxfield_id or not deck_data:
         return _json_response({"error": "Missing moxfield_id or deck_data"}, status_code=400)
 
-    # Resolve slug: config match → existing DB record → auto-generate from deck name
+    # A deck already known as John's own (in decks.yaml or previously synced) is always
+    # his own, regardless of the owner-username check — covers the case where
+    # MOXFIELD_USERNAME isn't configured yet, or Moxfield's field name turns out wrong.
     config_deck = next((d for d in config.decks if d.moxfield_id == moxfield_id), None)
+    known_own_deck = config_deck or mongodb.get_deck_by_moxfield_id(moxfield_id)
+
+    owner_username = extract_owner_username(deck_data)
+    is_reference_deck = (
+        not known_own_deck
+        and config.moxfield_username
+        and owner_username
+        and owner_username.lower() != config.moxfield_username.lower()
+    )
+
+    if is_reference_deck:
+        result = await reference_decks.sync_reference_deck(deck_data, source_url=source_url)
+        status = 500 if "error" in result else 200
+        return _json_response(result, status_code=status)
+
+    # Resolve slug: config match → existing DB record → auto-generate from deck name
     if config_deck:
         slug = config_deck.slug
     else:

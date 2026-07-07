@@ -5,6 +5,7 @@ const statusEl   = document.getElementById("status");
 const syncBtn    = document.getElementById("syncBtn");
 const serverInput = document.getElementById("serverUrl");
 const localInput  = document.getElementById("localUrl");
+const sourceUrlInput = document.getElementById("sourceUrl");
 
 function setStatus(msg, type = "") {
   statusEl.textContent = msg;
@@ -45,14 +46,14 @@ async function init() {
   syncBtn.addEventListener("click", () => syncDeck(slug));
 }
 
-async function postToServer(url, moxfieldId, deckData) {
+async function postToServer(url, moxfieldId, deckData, sourceUrl) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   try {
     const res = await fetch(`${url}/sync-deck`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moxfield_id: moxfieldId, deck_data: deckData }),
+      body: JSON.stringify({ moxfield_id: moxfieldId, deck_data: deckData, source_url: sourceUrl || undefined }),
       signal: controller.signal,
     });
     const result = await res.json();
@@ -105,8 +106,9 @@ async function syncDeck(slug) {
 
   setStatus(`Syncing to ${targets.map(t => t.label).join(" & ")}...`);
 
+  const sourceUrl = sourceUrlInput.value.trim();
   const results = await Promise.allSettled(
-    targets.map(t => postToServer(t.url, moxfieldId, deckData).then(r => ({ ...r, _label: t.label })))
+    targets.map(t => postToServer(t.url, moxfieldId, deckData, sourceUrl).then(r => ({ ...r, _label: t.label })))
   );
 
   const lines = [];
@@ -119,7 +121,8 @@ async function syncDeck(slug) {
       const name  = r.name || r.synced || r.skipped || "?";
       const title = r.title ? ` — ${r.title}` : "";
       const suffix = r.skipped ? " (already up to date)" : ` (${r.card_count ?? "?"} cards)`;
-      lines.push(`${label}: ${name}${title}${suffix}`);
+      const kind = r.owner_username !== undefined ? " [reference deck]" : "";
+      lines.push(`${label}: ${name}${title}${suffix}${kind}`);
       successCount++;
     } else {
       lines.push(`${label}: ${outcome.reason?.message ?? "failed"}`);

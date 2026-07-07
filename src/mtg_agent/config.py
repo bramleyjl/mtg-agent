@@ -28,12 +28,17 @@ class Config:
     decks_path: str = ""
     decks: list[DeckConfig] = field(default_factory=list)
     decks_by_slug: dict[str, DeckConfig] = field(default_factory=dict)
+    moxfield_username: str = ""
 
 
 def load_config() -> Config:
     mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
     mongodb_db = os.getenv("MONGODB_DB", "mtg_agent")
     notion_mcp_url = os.getenv("NOTION_MCP_URL", "")
+    # Compared (case-insensitive) against a synced deck's createdByUser to route it to
+    # `decks` (John's own) vs. `reference_decklists` (someone else's) — see server.py's
+    # /sync-deck handler.
+    moxfield_username = os.getenv("MOXFIELD_USERNAME", "")
 
     decks_path = os.getenv(
         "DECKS_CONFIG",
@@ -53,4 +58,5 @@ def load_config() -> Config:
         decks_path=decks_path,
         decks=decks,
         decks_by_slug=decks_by_slug,
+        moxfield_username=moxfield_username,
     )
