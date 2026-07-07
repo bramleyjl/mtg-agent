@@ -10,7 +10,7 @@ from mtg_agent.clients.moxfield import parse_deck_name
 from mtg_agent.config import load_config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import init_db
-from mtg_agent.tools import cards, combos, data_sources, decks, probability
+from mtg_agent.tools import cards, combos, data_sources, decks, probability, tags
 
 config = load_config()
 init_db(config.mongodb_uri, config.mongodb_db)
@@ -24,7 +24,11 @@ mcp = FastMCP(
 
 @mcp.tool()
 async def list_decks() -> list[dict]:
-    """List all configured Commander decks with their colors, bracket, and notes."""
+    """
+    List all configured Commander decks with their colors, description, and both
+    bracket fields: bracket (John's own nuanced read, e.g. "2.9", from Notion) and
+    bracket_official (WotC's strict 1-5 rating, from Moxfield).
+    """
     return await decks.list_decks(config)
 
 
@@ -115,9 +119,54 @@ async def find_combos_in_deck(slug: str) -> dict:
     found, so a non-null value means it's actually in the 99, not the command zone
     — the combo as described won't function until that changes.
 
-    Returns combos sorted by popularity (EDHREC-derived inclusion count).
+    Returns combos sorted by popularity (EDHREC-derived inclusion count), with
+    popularity_percentile giving that raw count context against the full ingested
+    combo corpus. See find_almost_combos() for combos the deck is close to but
+    hasn't fully completed yet.
     """
     return await combos.find_combos_in_deck(slug, config)
+
+
+@mcp.tool()
+async def find_almost_combos(slug: str, max_missing: int = 1) -> dict:
+    """
+    Find Commander Spellbook combos this deck is close to completing but doesn't
+    yet have every piece for — the companion to find_combos_in_deck() for "what
+    should I add" advice rather than "what do I already have".
+
+    A combo qualifies if the deck has at least one but not all of its `uses`
+    pieces (fully-owned combos are excluded — see find_combos_in_deck() for
+    those), every generic `requires` template is already satisfiable by a card
+    the deck runs, and the combo's color identity fits within the deck's own
+    colors. max_missing caps how many pieces can be absent (default 1).
+
+    Each result lists its missing piece(s) by name, flags commander_change_required
+    on any missing piece that must be the commander (a bigger ask than adding a
+    card to the 99), and includes popularity/popularity_percentile so results can
+    be prioritized by "most popular combo for the fewest missing cards".
+    """
+    return await combos.find_almost_combos(slug, config, max_missing=max_missing)
+
+
+@mcp.tool()
+async def search_tags(query: str, limit: int = 25) -> list[dict]:
+    """
+    Search Scryfall Tagger's oracle tags by keyword (matches label or slug).
+    Use this to discover a tag's exact slug before calling get_cards_by_tag() —
+    there are ~4500 tags, too many to memorize. Trivia/flavor/reprint-cycle tags
+    are excluded by default.
+    """
+    return tags.search_tags(query, limit=limit)
+
+
+@mcp.tool()
+async def get_cards_by_tag(tag: str, limit: int = 200) -> dict:
+    """
+    Return every card carrying a given Scryfall oracle tag (exact label or slug,
+    case-insensitive), sorted by tag weight then name. Use search_tags() first if
+    unsure of the exact slug.
+    """
+    return tags.get_cards_by_tag(tag, limit=limit)
 
 
 @mcp.tool()

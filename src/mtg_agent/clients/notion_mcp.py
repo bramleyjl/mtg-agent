@@ -21,14 +21,23 @@ async def update_page_properties(url: str, page_id: str, properties: dict) -> No
                 raise RuntimeError(f"notion_update_page_properties failed: {msg}")
 
 
-async def update_deck_page(url: str, page_id: str, name: str, title: str) -> None:
-    # Only sync Title from Moxfield; Name is managed manually in Notion
-    # (Notion names often have manual suffixes like "✔️" that we don't want to overwrite)
-    if not title:
+async def update_deck_page(
+    url: str, page_id: str, name: str, title: str,
+    description: str | None = None, bracket_official: str | None = None,
+) -> None:
+    # Only sync Title/Description/Bracket Official from Moxfield; Name and Bracket
+    # (John's own nuanced assessment) are managed manually in Notion (Notion names
+    # often have manual suffixes like "✔️" that we don't want to overwrite)
+    properties: dict = {}
+    if title:
+        properties["Title"] = {"rich_text": [{"text": {"content": title}}]}
+    if description:
+        properties["Description"] = {"rich_text": [{"text": {"content": description}}]}
+    if bracket_official:
+        properties["Bracket Official"] = {"select": {"name": bracket_official}}
+    if not properties:
         return
-    await update_page_properties(url, page_id, {
-        "Title": {"rich_text": [{"text": {"content": title}}]},
-    })
+    await update_page_properties(url, page_id, properties)
 
 
 async def fetch_page(url: str, page_id: str) -> dict | None:

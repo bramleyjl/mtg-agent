@@ -17,7 +17,7 @@ class DeckConfig:
     notion_id: str
     colors: list[str]
     bracket: str
-    notes: str
+    description: str
 
 
 @dataclass

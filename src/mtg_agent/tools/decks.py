@@ -75,6 +75,12 @@ async def sync_game_history(slug: str, config: Config) -> dict:
     past_commanders = [mongodb.resolve_commander_name(n) or n for n in raw_past]
     mongodb.get_db()["decks"].update_one({"slug": slug}, {"$set": {"past_commanders": past_commanders}})
 
+    # "Bracket" in Notion is John's own nuanced read (e.g. "2.9"), distinct from the
+    # strict WotC 1-5 "Bracket Official" synced from Moxfield in sync_deck(). Falls
+    # back to decks.yaml's bracket only if this deck's Notion page has none set.
+    bracket = _parse_notion_prop(deck_page.get("properties", {}).get("Bracket", {})) or deck_conf.bracket
+    mongodb.get_db()["decks"].update_one({"slug": slug}, {"$set": {"bracket": bracket}})
+
     known_ids = mongodb.get_known_game_ids(slug)
     new_ids = [gid for gid in game_ids if gid not in known_ids]
 
@@ -285,8 +291,9 @@ async def list_decks(config: Config) -> list[dict]:
             "name": d.name,
             "title": d.title,
             "colors": d.colors,
-            "bracket": d.bracket,
-            "notes": d.notes,
+            "bracket": stored.get("bracket") if stored else d.bracket,
+            "bracket_official": stored.get("bracket_official") if stored else None,
+            "description": d.description,
             "last_synced": stored.get("last_synced") if stored else None,
             "moxfield_updated_at": stored.get("moxfield_updated_at") if stored else None,
         })
@@ -301,6 +308,8 @@ def _slim_card(entry: dict) -> dict:
         result["oracle_id"] = oracle_id
     if entry.get("tags"):
         result["tags"] = entry["tags"]
+    if entry.get("scryfall_tags"):
+        result["scryfall_tags"] = entry["scryfall_tags"]
     return result
 
 
@@ -312,7 +321,7 @@ def _slim_deck(stored: dict) -> dict:
         "title": stored.get("title"),
         "colors": stored.get("colors"),
         "bracket": stored.get("bracket"),
-        "notes": stored.get("notes"),
+        "bracket_official": stored.get("bracket_official"),
         "moxfield_id": stored.get("moxfield_id"),
         "notion_id": stored.get("notion_id"),
         "last_synced": stored.get("last_synced"),
@@ -450,6 +459,11 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
             else:
                 missing.append(name)
 
+    deck_oracle_ids = [
+        c["oracle_id"] for c in enriched_cards.values() if c.get("oracle_id")
+    ]
+    scryfall_tags_by_id = mongodb.get_tags_for_oracle_ids(deck_oracle_ids)
+
     def build_entry(e: dict) -> dict:
         result = {"name": e["name"], "quantity": e["quantity"]}
         if e.get("scryfall_id"):
@@ -460,6 +474,10 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
             result["tags"] = e["tags"]
         if e.get("board"):
             result["board"] = e["board"]
+        oracle_id = enriched_cards.get(e["name"], {}).get("oracle_id")
+        hits = scryfall_tags_by_id.get(oracle_id) if oracle_id else None
+        if hits:
+            result["scryfall_tags"] = [h["label"] for h in hits]
         return result
 
     commander_entries = [build_entry(e) for e in commander_entries_raw]
@@ -505,15 +523,20 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
         "moxfield_id": effective_moxfield_id,
         "notion_id": deck_conf.notion_id if deck_conf else None,
         "colors": colors,
-        # Config bracket overrides Moxfield's (allows manual correction); falls back to Moxfield's value
-        "bracket": (deck_conf.bracket if deck_conf else None) or deck_meta.get("bracket"),
-        "notes": deck_conf.notes if deck_conf else None,
+        # bracket_official is WotC's own strict 1-5 rating, straight from Moxfield, no
+        # override — it's a fact about the deck, not John's opinion. bracket (John's own
+        # nuanced read, e.g. "2.9"/"3.9") lives in Notion and is synced in by
+        # sync_game_history(), not here. description: Moxfield is the source of truth,
+        # config is only a fallback for decks with no Moxfield description set — see
+        # update_deck_page() call below for the Notion push.
+        "bracket_official": deck_meta.get("bracket"),
+        "description": deck_meta.get("description") or (deck_conf.description if deck_conf else None),
         "moxfield_updated_at": moxfield_updated_at,
         "commanders": commander_entries,
         "mainboard": mainboard,
         "maybeboard": maybeboard,
         "stats": stats,
-        **{k: v for k, v in deck_meta.items() if v is not None and k != "bracket"},
+        **{k: v for k, v in deck_meta.items() if v is not None and k not in ("bracket", "description")},
     }
     mongodb.upsert_deck(slug, doc)
 
@@ -524,7 +547,10 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
     notion_id = deck_conf.notion_id if deck_conf else None
     if notion_id and config.notion_mcp_url:
         try:
-            await update_deck_page(config.notion_mcp_url, notion_id, mox_name, mox_title)
+            await update_deck_page(
+                config.notion_mcp_url, notion_id, mox_name, mox_title,
+                doc["description"], doc["bracket_official"],
+            )
             update_results["notion"] = "updated"
         except Exception as e:
             update_results["notion"] = f"error: {e}"
