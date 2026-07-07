@@ -57,6 +57,18 @@ async def get_deck_full(slug: str) -> dict | None:
 
 
 @mcp.tool()
+async def update_deck_working_notes(slug: str, notes: str) -> dict:
+    """
+    Write a deck's working-notes document (theme/strategy, strengths, weaknesses,
+    restraints, current focus, recurring patterns, turns-to-win, similar decklists)
+    to its Notion page body, mirroring the same content into MongoDB in the same
+    call. Use get_deck_full() to read the current notes back (returned as
+    `working_notes`). Always call out what changed when writing — never a silent edit.
+    """
+    return await decks.update_deck_working_notes(slug, notes, config)
+
+
+@mcp.tool()
 async def sync_game_history(slug: str) -> dict:
     """
     Sync game history for a deck from Notion to MongoDB.

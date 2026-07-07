@@ -56,5 +56,38 @@ async def fetch_page(url: str, page_id: str) -> dict | None:
             return None
 
 
+async def fetch_page_body(url: str, page_id: str) -> str | None:
+    """Fetch a Notion page's body content (blocks below the properties) as markdown."""
+    async with streamablehttp_client(url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("notion_get_page_body", {"page_id": page_id})
+            if result.isError:
+                msg = next((b.text for b in result.content if hasattr(b, "text")), "unknown error")
+                raise RuntimeError(f"notion_get_page_body failed: {msg}")
+            import json
+            for block in result.content:
+                if hasattr(block, "text"):
+                    try:
+                        return json.loads(block.text).get("markdown")
+                    except (json.JSONDecodeError, TypeError):
+                        return None
+            return None
+
+
+async def update_page_body(url: str, page_id: str, markdown: str) -> None:
+    """Replace a Notion page's body content with the given markdown (full replace)."""
+    async with streamablehttp_client(url) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool(
+                "notion_update_page_body",
+                {"page_id": page_id, "markdown": markdown},
+            )
+            if result.isError:
+                msg = next((b.text for b in result.content if hasattr(b, "text")), "unknown error")
+                raise RuntimeError(f"notion_update_page_body failed: {msg}")
+
+
 # Alias kept for callers that fetched deck pages before this refactor
 fetch_deck_page = fetch_page

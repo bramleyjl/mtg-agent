@@ -85,11 +85,12 @@ MCP_PORT=8765
 ssh pangolin 'cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk'
 ```
 
-**3. Cron jobs** — add to the `admin` user's crontab (`crontab -e` on pangolin). Three lines cover six refresh scripts; each script still self-gates via `--if-stale` against its own staleness window, so a nightly trigger only does real work when something's actually due:
+**3. Cron jobs** — add to the `admin` user's crontab (`crontab -e` on pangolin). Four lines cover eight refresh scripts; each script still self-gates via `--if-stale` against its own staleness window, so a nightly trigger only does real work when something's actually due:
 
 ```
 0 3 * * * cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_scryfall_bulk --if-stale >> /tmp/scryfall_bulk_refresh.log 2>&1
 0 4 * * * cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_comprehensive_rules --if-stale >> /tmp/comprehensive_rules_refresh.log 2>&1 ; .venv/bin/python -m mtg_agent.scripts.refresh_commander_banlist --if-stale >> /tmp/commander_banlist_refresh.log 2>&1 ; .venv/bin/python -m mtg_agent.scripts.refresh_commander_brackets --if-stale >> /tmp/commander_brackets_refresh.log 2>&1 ; .venv/bin/python -m mtg_agent.scripts.refresh_commander_bracket_announcements --if-stale >> /tmp/commander_bracket_announcements_refresh.log 2>&1 ; .venv/bin/python -m mtg_agent.scripts.refresh_commander_banr_announcements --if-stale >> /tmp/commander_banr_announcements_refresh.log 2>&1
+0 5 * * * cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_deck_working_notes --if-stale >> /tmp/deck_working_notes_refresh.log 2>&1
 0 9 * * * cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_agent.scripts.refresh_commander_spellbook --if-stale >> /tmp/commander_spellbook_refresh.log 2>&1
 ```
 
@@ -103,6 +104,8 @@ ssh pangolin 'cd /home/admin/Projects/mcps/mtg-agent && .venv/bin/python -m mtg_
 - `refresh_commander_banr_announcements` — same auto-discovery pattern via `?search=Commander+Banned+and+Restricted`, populates `commander_banr_announcements` with WotC's stated *reasoning* per ban/unban. Only surfaces announcements from when WotC took over B&R from the Rules Committee (2024 onward) — intentional, not a gap.
 
 Run any of the five without `--if-stale` for a manual out-of-cycle update (e.g. John usually hears about B&R changes same-day, well inside the 8-week window).
+
+**5am — `refresh_deck_working_notes`** reconciles manual edits to a deck's Notion page body (the per-deck working-notes document — theme, strengths/weaknesses, restraints, current focus, recurring patterns, turns-to-win, similar decklists) into MongoDB's `working_notes` field on `decks`. This is the fallback path only: the primary path is the `update_deck_working_notes` MCP tool (`tools/decks.py`), which the agent calls directly — it writes to Notion and MongoDB in the same operation, so the two never drift on agent-driven updates. This script exists to catch the case where John hand-edits a deck's Notion page body himself, bypassing that tool. Staleness isn't a fixed time window like the other scripts — each deck's Notion `last_edited_time` is compared against its own `working_notes_synced_at` in MongoDB, and only pages edited more recently get their body re-pulled. `refresh()` is async (needs notion-mcp calls), unlike the other scripts in this list — `main()` wraps it in `asyncio.run()` for the cron/CLI entry point, and `tools/data_sources.py`'s `refresh_all_data_sources()` awaits it directly since that caller is already async.
 
 **9am — `refresh_commander_spellbook`** manages two independently-staled things:
 - **Combos** (`refresh()`) — staleness checked against the **remote** bulk file's `Last-Modified` header, not local data age, since new combos track card releases rather than a calendar. Downloads the full `variants.json` bulk file from `json.commanderspellbook.com` (~550MB), filters to `legalities.commander == true`, populates `commander_combos` (~95k variants).

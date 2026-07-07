@@ -3,7 +3,13 @@ from datetime import datetime, timezone
 import httpx
 
 from mtg_agent.clients import moxfield, scryfall
-from mtg_agent.clients.notion_mcp import fetch_page, update_deck_page, update_page_properties
+from mtg_agent.clients.notion_mcp import (
+    fetch_page,
+    fetch_page_body,
+    update_deck_page,
+    update_page_body,
+    update_page_properties,
+)
 from mtg_agent.config import Config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id, get_prices_by_scryfall_ids
@@ -21,6 +27,11 @@ def _commander_matches(winner: str, commander_name: str) -> bool:
     """
     a, b = _cmp(winner), _cmp(commander_name)
     return a in b or b in a
+
+
+def _parse_notion_datetime(value: str) -> datetime:
+    """Parse a Notion API ISO8601 timestamp (e.g. last_edited_time) into an aware datetime."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _parse_notion_prop(prop: dict) -> object:
@@ -359,6 +370,36 @@ async def get_deck(slug: str, config: Config) -> dict | None:
             },
         }
     return _slim_deck(stored)
+
+
+async def update_deck_working_notes(slug: str, notes: str, config: Config) -> dict:
+    """
+    Write a deck's per-deck working-notes document (theme, strengths/weaknesses,
+    restraints, current focus, recurring patterns, turns-to-win, similar decklists)
+    to its Notion page body, and mirror the same content into MongoDB's
+    `working_notes` field in the same call — Notion is the source of truth, Mongo
+    is a read-optimized copy kept in lockstep with every agent-driven write.
+
+    Manual edits made directly in Notion (bypassing this function) are not caught
+    here — those are reconciled separately by the refresh_deck_working_notes cron.
+    """
+    stored = mongodb.get_deck(slug)
+    if not stored:
+        return {"error": f"Deck '{slug}' not yet synced. Run sync_deck('{slug}') first."}
+
+    notion_id = stored.get("notion_id")
+    if not notion_id or not config.notion_mcp_url:
+        return {"error": f"No notion_id for '{slug}' or NOTION_MCP_URL not set"}
+
+    await update_page_body(config.notion_mcp_url, notion_id, notes)
+    page = await fetch_page(config.notion_mcp_url, notion_id)
+    synced_at = _parse_notion_datetime(page["last_edited_time"]) if page else datetime.now(timezone.utc)
+
+    mongodb.get_db()["decks"].update_one(
+        {"slug": slug},
+        {"$set": {"working_notes": notes, "working_notes_synced_at": synced_at}},
+    )
+    return {"slug": slug, "updated": True, "working_notes_synced_at": synced_at.isoformat()}
 
 
 async def get_deck_full(slug: str, config: Config) -> dict | None:
