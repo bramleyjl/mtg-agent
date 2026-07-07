@@ -35,6 +35,7 @@ Skip template resolve:  python -m mtg_agent.scripts.refresh_commander_spellbook 
 """
 
 import argparse
+import bisect
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -79,7 +80,16 @@ def _is_stale(remote: str | None) -> bool:
     return remote != _stored_last_modified()
 
 
-def _to_doc(variant: dict) -> dict:
+def _popularity_percentile(popularity: int | None, pop_values: list[int]) -> float | None:
+    """Percentile rank of a combo's popularity against every measured combo in this refresh."""
+    if popularity is None or not pop_values:
+        return None
+    rank = bisect.bisect_right(pop_values, popularity)
+    return round(100 * rank / len(pop_values), 1)
+
+
+def _to_doc(variant: dict, pop_values: list[int]) -> dict:
+    popularity = variant.get("popularity")
     return {
         "variant_id": variant["id"],
         "combo_group_id": [c["id"] for c in variant.get("of", [])],
@@ -108,7 +118,8 @@ def _to_doc(variant: dict) -> dict:
         ],
         "description": variant.get("description"),
         "legalities": variant.get("legalities"),
-        "popularity": variant.get("popularity"),
+        "popularity": popularity,
+        "popularity_percentile": _popularity_percentile(popularity, pop_values),
         "last_synced": datetime.now(timezone.utc),
     }
 
@@ -130,10 +141,14 @@ def refresh(force: bool = False) -> None:
     commander_legal = [v for v in variants if v.get("legalities", {}).get("commander")]
     print(f"  {len(commander_legal)} are commander-legal — upserting...", flush=True)
 
+    pop_values = sorted(
+        v["popularity"] for v in commander_legal if v.get("popularity") is not None
+    )
+
     db = get_db()
     batch: list[dict] = []
     for variant in commander_legal:
-        batch.append(_to_doc(variant))
+        batch.append(_to_doc(variant, pop_values))
         if len(batch) >= BATCH_SIZE:
             db[COLLECTION].bulk_write(
                 [ReplaceOne({"variant_id": d["variant_id"]}, d, upsert=True) for d in batch], ordered=False
