@@ -10,7 +10,7 @@ from mtg_agent.clients.moxfield import parse_deck_name
 from mtg_agent.config import load_config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import init_db
-from mtg_agent.tools import cards, combos, data_sources, decks, edhrec, preferences, probability, tags
+from mtg_agent.tools import cards, combos, data_sources, decks, edhrec, preferences, probability, tags, theory
 
 config = load_config()
 init_db(config.mongodb_uri, config.mongodb_db)
@@ -103,6 +103,26 @@ async def search_player_preferences(query: str, deck_slug: str = "") -> list[dic
     statements. Optionally scope to one deck via deck_slug.
     """
     return await preferences.search_player_preferences(query, deck_slug=deck_slug or None)
+
+
+@mcp.tool()
+async def record_player_theory(title: str, text: str) -> dict:
+    """
+    Record a long-form player-theory essay — John's own reasoning on a
+    deckbuilding/strategy topic (e.g. bracket-system philosophy vs. local meta
+    reality), built through back-and-forth conversation, not authored solo.
+    NOT for organic one-off opinions (use record_player_preference for those)
+    or per-deck notes (use update_deck_working_notes for those). Re-recording
+    under the same title replaces the prior version entirely. Always call out
+    that you're saving a theory essay when you do this — never a silent write.
+    """
+    return await theory.record_player_theory(title, text)
+
+
+@mcp.tool()
+async def search_player_theory(query: str) -> list[dict]:
+    """Keyword search over recorded player-theory essays."""
+    return await theory.search_player_theory(query)
 
 
 @mcp.tool()

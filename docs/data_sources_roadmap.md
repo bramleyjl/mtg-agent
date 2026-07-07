@@ -184,31 +184,48 @@ Unique index: `(commander_oracle_id, oracle_id, scope)` — the same card carrie
 
 ### CW text sources — two top-level content types
 
-All CW prose ends up chunked small for RAG regardless of origin, but the top-level `category`/`content_type` view should still distinguish **why** a piece of text is short or long, since that context matters for interpretation (a one-line Discord comment carries far less authority/context than a structured article):
+**`content_type` (long-form vs. short-form) — resolved 2026-07-07: documentation-level grouping only, not a stored field.** `category` already uniquely identifies the source, and the full set of `category` values (current + planned, long-form only — see deferral below) is short enough to hang a static lookup off of instead of carrying redundant data on every chunk:
 
-**Long-form (`content_type: long_form`)** — organized, coherent, written with a 10,000-foot view:
+```python
+# chunking.py — derived, not persisted; no consumer needs it as a queryable field yet
+CATEGORY_CONTENT_TYPE = {
+    "commander_bracket": "long_form",   # live
+    "commander_banr": "long_form",      # live
+    "strategy_article": "long_form",    # planned
+    "primer": "long_form",              # planned
+    "reddit_post": "long_form",         # planned, well-organized/effortful posts only
+    "player_theory": "long_form",       # planned
+}
+```
+
+Add this dict alongside `chunk_text()` only once something actually needs to filter/weight by content_type at read time (nothing does today — `search_content_chunks(query, category=...)` already covers current needs). Short-form categories (Reddit comments, Discord messages, `game_history.notes`) are deliberately left off this table — see deferral note below.
+
+**Social-media / short-form ingestion (Reddit comments, Discord) — explicitly deferred, 2026-07-07.** Sequencing decision: standard long-form primers/articles (Commander's Herald, future primers, effortful Reddit posts, `player_theory`) get built first, since that work also naturally involves extracting/linking the decklists those articles typically reference (the existing "similar decklists by other players" section in each deck's working notes is the concrete tie-in — see the working-notes template in the Dual HD+CW section above). The short-form/threaded-conversation architecture (4th chunking tier question, thread-grouping vs. `chunk_text()`'s paragraph-merge logic, whether Reddit/Discord are even in scope) is revisited only after that long-form work lands, not before.
+
+**Long-form (organized, coherent, written with a 10,000-foot view):**
+
+**Remaining `📋 Planned` categories are each their own dedicated planning session — 2026-07-07.** `strategy_article`, `primer`, and `reddit_post` are not a single follow-on task; each has its own unresolved scoping work (per-site scraper design and discovery mechanism for `strategy_article`; the `deck_slug`-scoping schema gap for `primer`; a Reddit API client plus a "well-organized vs. low-effort" curation judgment for `reddit_post`) and should get its own scoping/planning pass rather than being bundled together or assumed to follow the same build shape as `player_theory` (which was unusually cheap since it needed zero new ingestion infra). `player_theory` is the only one of the four long-form categories built so far.
 
 | Source | Status | Collection(s) | Notes |
 |---|---|---|---|
-| Commander's Herald articles | 📋 Planned | `content_chunks` (`category: commanders_herald`) | No fetch/parse client yet; uses the existing `article` chunking tier (`chunk_text()`) unchanged |
-| Future primers | 📋 Planned | `content_chunks` (new `category`) | Long-form deck primers, same `article` chunking tier |
-| Well-organized/effortful Reddit posts | 📋 Planned | `content_chunks` (new `category`) | Distinguished from Reddit *comments* below by length/structure, not just source — a long deck-tech post belongs here, not in the short-form bucket |
-| John's own long-form theory essays (e.g. bracket-system philosophy vs. local meta reality) | 📋 Planned | `content_chunks` (new `category: player_theory`) | **2026-07-07 design note:** structurally the same as any other long-form source — reuses `chunk_text()` unchanged, just authored by John instead of scraped from a site. No fetch/parse client needed; write path is a new `record_player_theory(title, text)` tool that slugifies `title` into a synthetic stable key (e.g. `internal://player_theory/bracket-system-philosophy`) used with `replace_content_chunks()`, so re-recording under the same title cleanly replaces stale content instead of accumulating duplicates — same delete-then-reinsert semantics as a revised WotC announcement. Read side is free: `search_content_chunks(query, category="player_theory")` behind a thin wrapper, no new search infra. **Explicitly deferred, and explicitly *not* meant to be freeform essay-writing on John's part** — John wants these built through back-and-forth conversation with the agent (like this bracket-system discussion), not sat down and authored solo. Whatever in-session mechanism ends up handling `player_preferences` (see below) should inform how a longer dialogue gets distilled into essay form here — pick this up after `player_preferences` ships and the conversational-capture pattern is proven. |
+| Web strategy articles (Commander's Herald, EDHREC's own written articles, Commander's Quarter, etc.) | 📋 Planned | `content_chunks` (`category: strategy_article`) | **2026-07-07 design note:** `category` deliberately describes the content's *genre*, not its site — strategy articles can come from many outlets (Commander's Herald was the original example, but EDHREC also publishes staff articles distinct from its structured card-usage API data, and others exist). No per-site category; `source_url` already captures which site a given chunk came from if that's ever needed for filtering, so it doesn't need duplicating into `category`. No fetch/parse client yet (will likely need a per-site parser each, but they all land in the same `category`); uses the existing `article` chunking tier (`chunk_text()`) unchanged. Article ingestion should also extract/link any decklists the article references — natural pairing with the "similar decklists" working-notes section, not a separate future task. |
+| Future primers | 📋 Planned | `content_chunks` (`category: primer`) | Long-form deck primers, same `article` chunking tier. Same decklist-extraction pairing as above. |
+| Well-organized/effortful Reddit posts | 📋 Planned | `content_chunks` (`category: reddit_post`) | Distinguished from Reddit *comments* (deferred, short-form) by length/structure, not just source — a long deck-tech post belongs here |
+| John's own long-form theory essays (e.g. bracket-system philosophy vs. local meta reality) | ✅ Built + verified live 2026-07-07 | `content_chunks` (`category: player_theory`) | Structurally the same as any other long-form source — reuses `chunk_text()` unchanged, just authored by John instead of scraped from a site. No fetch/parse client needed. **`record_player_theory(title, text)`** (`tools/theory.py`, registered in `server.py`) slugifies `title` into a synthetic stable key (e.g. `internal://player_theory/bracket-system-philosophy`) used with `replace_content_chunks()`, so re-recording under the same title cleanly replaces stale content instead of accumulating duplicates — same delete-then-reinsert semantics as a revised WotC announcement. `published_date` is set to the record-time timestamp (no natural publish date for an authored essay). **`search_player_theory(query)`** wraps `search_content_chunks(query, category="player_theory")`, no new search infra. Built through back-and-forth conversation with the agent, not John sitting down and authoring solo — mirrors the `player_preferences` in-session capture pattern. **First real entry recorded and end-to-end verified 2026-07-07:** "Bracket System Philosophy: My Approach vs. WotC Guidelines" — John's decimal-bracket system (`.9`/`.5` nuance vs. WotC's flat 1-5), where the official bracket text holds up (hard card-choice restrictions) vs. breaks down (subjective turns-to-win/pressure expectations, with common B2-in-name-only patterns like commander clones + effect doublers and stacked Blood Artist/Impact Tremors effects as concrete examples), built through the same conversational back-and-forth as `player_preferences`. Deployed to pangolin and round-tripped via raw MCP JSON-RPC (`record_player_theory` → `search_player_theory`) to confirm the write/chunk/index/search pipeline works end-to-end, since the harness's own tool index doesn't refresh mid-session after a server restart. |
 
-**Short-form (`content_type: short_form`)** — low-context, low word count, no inherent structure:
+**Short-form (low-context, low word count, no inherent structure) — deferred as a category, see above:**
 
 | Source | Status | Collection(s) | Notes |
 |---|---|---|---|
-| John's personal game recaps | ✅ Live (as data) / 📋 Planned (as CW text) | `game_history.notes` today; candidate for `content_chunks` later | Already the CW half of the Dual HD+CW `game_history` row above — usually a short paragraph, listed here to keep the short-form taxonomy complete |
-| Reddit comments (r/EDH etc.) | 📋 Planned | `content_chunks` (new `category`) | No fetch/parse client yet; likely doesn't need `chunk_text()`'s paragraph-merge logic at all given how short these are — may just need light dedup/threading, not real chunking |
-| Discord messages | 📋 Planned | `content_chunks` (new `category`) | Mentioned as a future prose source in `chunking.py` docstring; no client; same short-form handling question as Reddit comments |
+| John's personal game recaps | ✅ Live (as data) / 📋 Deferred (as CW text) | `game_history.notes` today; candidate for `content_chunks` later | Already the CW half of the Dual HD+CW `game_history` row above — folds into the short-form/social-media architecture pass, not scheduled separately |
+| Reddit comments (r/EDH etc.) | 📋 Deferred | `content_chunks` (category TBD) | Blocked on the short-form/threading architecture decision, deliberately picked up after long-form primers/articles land |
+| Discord messages | 📋 Deferred | `content_chunks` (category TBD) | Mentioned as a future prose source in `chunking.py` docstring; same deferral as Reddit comments |
 
 ## Open questions for the next planning pass
 
-- **Long-form vs short-form as a schema concept**: does this become a literal `content_type` field on `content_chunks` (orthogonal to `category`), or is it purely a documentation-level grouping? If it's a real field, the existing `chunk_text()` tier (`article`) maps to `long_form`; short-form sources may not need `chunk_text()`'s min/max-char merge logic at all (a single Discord message or game recap is already "one chunk") — possibly a 4th chunking tier that's mostly a pass-through with light concatenation by thread/session.
-
 - **Usage-frequency library**: resolved 2026-07-06 as **EDHREC-only** (Commander Spellbook's `popularity` is combo-level, not commander-scoped) and **built 2026-07-07** — see the EDHREC section above for the shipped `card_usage_stats`/`edhrec_commander_meta` schema.
-- How to actually capture the "personal preference corpus" — does this need a lightweight in-session flagging mechanism (agent notices a stated preference and writes it), or a periodic pass over chat history?
+- **Personal preference corpus capture mechanism**: resolved and **built 2026-07-07** — in-session flagging, see the `player_preferences` row above.
+- **`content_type` as schema concept**: resolved 2026-07-07 — documentation-level grouping only (`CATEGORY_CONTENT_TYPE` lookup, not a stored field). See above.
+- **Short-form/social-media chunking architecture (4th tier)**: deferred 2026-07-07 until after long-form primer/article ingestion lands. See deferral note above.
 - Where's the line between "EDHREC synergy data" and "other people's decklists" when EDHREC recs are themselves derived from aggregated decklists?
-- Priority order for the planned CW sources (personal preference corpus / EDHREC / other decklists / Commander's Herald / Reddit / Discord) — which unblocks the most useful agent behavior first?
-- Whether Reddit/Discord ingestion is even in scope given their discussion-thread (not article) shape — may need a 4th chunking tier.
+- Priority order for the remaining planned CW sources (other decklists / Commander's Herald / future primers / player_theory) — which unblocks the most useful agent behavior first?
