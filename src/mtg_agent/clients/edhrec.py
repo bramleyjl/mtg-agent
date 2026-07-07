@@ -40,12 +40,16 @@ def commander_slug(name: str) -> str:
 
 def fetch_commander_page(slug: str, sub_page: str | None = None) -> dict | None:
     """
-    Fetch a commander's default, bracket, or tag JSON page. Returns None on 404
-    (e.g. a commander EDHREC doesn't have data for), raises on other HTTP errors.
+    Fetch a commander's default, bracket, or tag JSON page. Returns None if the
+    page doesn't exist (e.g. an invalid tag slug, or a commander EDHREC has no
+    data for) — confirmed a missing page 404s for the top-level commander page
+    but 403s for a missing sub-page (S3/CloudFront access-denied on a missing
+    key, not a real auth failure), so both are treated as "not found" here.
+    Raises on any other HTTP error.
     """
     url = f"{BASE_URL}/{slug}.json" if sub_page is None else f"{BASE_URL}/{slug}/{sub_page}.json"
     resp = httpx.get(url, timeout=15.0, follow_redirects=True)
-    if resp.status_code == 404:
+    if resp.status_code in (404, 403):
         return None
     resp.raise_for_status()
     return resp.json()
