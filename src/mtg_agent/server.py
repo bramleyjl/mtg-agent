@@ -169,13 +169,15 @@ async def search_strategy_articles(
 
 
 @mcp.tool()
-async def sync_game_history(slug: str) -> dict:
+async def sync_game_history(slug: str, force: bool = False) -> dict:
     """
     Sync game history for a deck from Notion to MongoDB.
     Fetches only new game records not already stored (incremental).
     Run this after logging new games in Notion to bring MongoDB up to date.
+    Pass force=True to also re-fetch every already-known record (e.g. after
+    a Notion template change to existing pages).
     """
-    return await decks.sync_game_history(slug, config)
+    return await decks.sync_game_history(slug, config, force=force)
 
 
 @mcp.tool()
@@ -647,6 +649,11 @@ async def http_sync_deck(request: Request) -> JSONResponse:
             slug = re.sub(r"[^a-z0-9]+", "_", raw_name.lower()).strip("_") or moxfield_id
 
     result = await decks.sync_deck(slug, config, prefetched_data=deck_data, moxfield_id=moxfield_id)
+    if "error" not in result:
+        try:
+            result["game_history"] = await decks.sync_game_history(slug, config)
+        except Exception as e:
+            result["game_history"] = f"error: {e}"
     status = 500 if "error" in result else 200
     return _json_response(result, status_code=status)
 

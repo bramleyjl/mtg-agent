@@ -53,13 +53,20 @@ def _parse_notion_prop(prop: dict) -> object:
         return [r["id"] for r in prop.get("relation", [])]
     if ptype == "unique_id":
         return prop.get("unique_id", {}).get("number")
+    if ptype == "number":
+        return prop.get("number")
+    if ptype == "checkbox":
+        return prop.get("checkbox")
     return None
 
 
-async def sync_game_history(slug: str, config: Config) -> dict:
+async def sync_game_history(slug: str, config: Config, force: bool = False) -> dict:
     """
     Sync game history for a deck from Notion to MongoDB.
-    Fetches only game records not already stored (incremental).
+    Fetches only game records not already stored (incremental), unless
+    force=True, which also re-fetches every already-known record — useful
+    after a Notion template change (new/renamed property, body-content edit)
+    that incremental sync alone wouldn't pick up for existing pages.
     """
     deck_conf = config.decks_by_slug.get(slug)
     if not deck_conf:
@@ -93,7 +100,7 @@ async def sync_game_history(slug: str, config: Config) -> dict:
     mongodb.get_db()["decks"].update_one({"slug": slug}, {"$set": {"bracket": bracket}})
 
     known_ids = mongodb.get_known_game_ids(slug)
-    new_ids = [gid for gid in game_ids if gid not in known_ids]
+    new_ids = game_ids if force else [gid for gid in game_ids if gid not in known_ids]
 
     synced = 0
     errors = []
@@ -123,6 +130,10 @@ async def sync_game_history(slug: str, config: Config) -> dict:
             john_commanders |= set((john_deck or {}).get("past_commanders", []))
             won = any(_commander_matches(full_winner, c) for c in john_commanders) if full_winner else False
 
+            # Free-text game recap lives in the page body, not the title (the title
+            # is just a short "YYYY-MM-DD G#" label John fills in when logging a game).
+            notes = await fetch_page_body(config.notion_mcp_url, game_id)
+
             record = {
                 "notion_id": game_id,
                 "deck_slug": slug,
@@ -130,7 +141,9 @@ async def sync_game_history(slug: str, config: Config) -> dict:
                 "enemy_commanders": full_enemy,
                 "winner": full_winner,
                 "won": won,
-                "notes": _parse_notion_prop(props.get("Notes", {})),
+                "notes": notes,
+                "turn_ended": _parse_notion_prop(props.get("Turn Ended", {})),
+                "turn_order": _parse_notion_prop(props.get("Seat Order", {})),
                 "synced_at": datetime.now(timezone.utc),
             }
             mongodb.upsert_game_record(record)
