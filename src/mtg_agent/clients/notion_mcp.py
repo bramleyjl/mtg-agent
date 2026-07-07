@@ -34,7 +34,7 @@ async def update_deck_page(
     if description:
         properties["Description"] = {"rich_text": [{"text": {"content": description}}]}
     if bracket_official:
-        properties["Bracket Official"] = {"select": {"name": bracket_official}}
+        properties["Bracket Official"] = {"select": {"name": str(bracket_official)}}
     if not properties:
         return
     await update_page_properties(url, page_id, properties)

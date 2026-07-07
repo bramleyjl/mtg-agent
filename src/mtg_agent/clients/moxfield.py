@@ -98,7 +98,11 @@ def extract_deck_meta(deck_data: dict) -> dict:
         "hubs": hubs or None,
         "color_percentages": deck_data.get("colorPercentages") or None,
         "color_identity_percentages": deck_data.get("colorIdentityPercentages") or None,
-        "bracket": deck_data.get("bracket") or deck_data.get("userBracket") or None,
+        # Moxfield returns this as an int; every other bracket field in this app
+        # (John's nuanced Notion value, decks.yaml) is a string like "2.9" — keep
+        # bracket_official consistent with them, and Notion's select property
+        # requires a string name anyway.
+        "bracket": str(b) if (b := deck_data.get("bracket") or deck_data.get("userBracket")) is not None else None,
     }
 
 
