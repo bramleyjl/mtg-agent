@@ -10,7 +10,7 @@ from mtg_agent.clients.moxfield import parse_deck_name
 from mtg_agent.config import load_config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import init_db
-from mtg_agent.tools import cards, combos, data_sources, decks, edhrec, probability, tags
+from mtg_agent.tools import cards, combos, data_sources, decks, edhrec, preferences, probability, tags
 
 config = load_config()
 init_db(config.mongodb_uri, config.mongodb_db)
@@ -66,6 +66,43 @@ async def update_deck_working_notes(slug: str, notes: str) -> dict:
     `working_notes`). Always call out what changed when writing — never a silent edit.
     """
     return await decks.update_deck_working_notes(slug, notes, config)
+
+
+@mcp.tool()
+async def record_player_preference(
+    text: str,
+    deck_slug: str = "",
+    topic_tags: list[str] | None = None,
+    session_context: str = "",
+) -> dict:
+    """
+    Record one atomic player-stated preference or playstyle opinion (e.g. risk
+    tolerance, deckbuilding philosophy, an opinion about a specific deck raised
+    in passing). Use this when John states an opinion organically in
+    conversation — NOT for a formal instruction to edit a deck's own document
+    (use update_deck_working_notes for that instead). Always call out that
+    you're saving a preference when you do this — never a silent write.
+
+    deck_slug is optional — set it when the statement is about one specific
+    deck, leave unset for general playstyle opinions. topic_tags are free-form
+    (e.g. ["risk-tolerance", "combo-density"]).
+    """
+    return await preferences.record_player_preference(
+        text,
+        deck_slug=deck_slug or None,
+        topic_tags=topic_tags,
+        session_context=session_context or None,
+    )
+
+
+@mcp.tool()
+async def search_player_preferences(query: str, deck_slug: str = "") -> list[dict]:
+    """
+    Keyword search over recorded player preferences/playstyle opinions, ranked
+    by text relevance with recency as a tiebreaker for conflicting/evolved
+    statements. Optionally scope to one deck via deck_slug.
+    """
+    return await preferences.search_player_preferences(query, deck_slug=deck_slug or None)
 
 
 @mcp.tool()

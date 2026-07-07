@@ -85,6 +85,10 @@ def _ensure_indexes() -> None:
     _create_index(db["content_chunks"], [("source_url", ASCENDING)])
     _create_index(db["content_chunks"], [("category", ASCENDING)])
     _create_index(db["content_chunks"], [("title", TEXT), ("text", TEXT)])
+    # Short-form tier: atomic player-stated preferences, one document per statement.
+    _create_index(db["player_preferences"], [("deck_slug", ASCENDING)])
+    _create_index(db["player_preferences"], [("stated_at", ASCENDING)])
+    _create_index(db["player_preferences"], [("text", TEXT)])
 
 
 def upsert_deck(slug: str, data: dict[str, Any]) -> None:
@@ -434,6 +438,32 @@ def search_content_chunks(query: str, category: str | None = None, limit: int = 
         filter_,
         {"_id": 0, "score": {"$meta": "textScore"}},
     ).sort([("score", {"$meta": "textScore"})]).limit(limit))
+
+
+def insert_player_preference(doc: dict[str, Any]) -> str:
+    """
+    Record one atomic player-stated preference/playstyle statement
+    (short-form tier — see docs/data_sources_roadmap.md). Append-only:
+    no update/dedup on write, evolution is tracked by stated_at and
+    resolved at read time (recency as tiebreaker on conflicting statements).
+    """
+    result = get_db()["player_preferences"].insert_one(doc)
+    return str(result.inserted_id)
+
+
+def search_player_preferences(query: str, deck_slug: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+    """
+    Keyword search over recorded player preferences, ranked by text
+    relevance with recency as a secondary sort (tiebreaker for
+    conflicting/evolved statements). Optionally scope to one deck.
+    """
+    filter_: dict[str, Any] = {"$text": {"$search": query}}
+    if deck_slug:
+        filter_["deck_slug"] = deck_slug
+    return list(get_db()["player_preferences"].find(
+        filter_,
+        {"_id": 0, "score": {"$meta": "textScore"}},
+    ).sort([("score", {"$meta": "textScore"}), ("stated_at", -1)]).limit(limit))
 
 
 def search_rules(query: str, limit: int = 10) -> list[dict[str, Any]]:
