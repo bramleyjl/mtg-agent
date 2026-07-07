@@ -182,6 +182,22 @@ def resolve_commander_name(name: str) -> str | None:
         deck_matches = [m["name"] for m in matches if m["name"] in known]
         if len(deck_matches) == 1:
             return deck_matches[0]
+    if matches:
+        return None
+
+    # Fallback: the name may already be a comma-stripped full name written back to
+    # Notion by a previous sync (e.g. "Sidisi Brood Tyrant" from "Sidisi, Brood
+    # Tyrant") — the pattern above requires a comma/space right after the exact
+    # prefix, which a stripped name no longer has. Compare comma-insensitively.
+    first_word = re.escape(name.split(" ")[0])
+    candidates = db["scryfall_oracle"].find(
+        {"name": re.compile(f"^{first_word}[, ]", re.IGNORECASE), "type_line": re.compile("Legendary")},
+        {"name": 1, "_id": 0},
+    ).limit(20)
+    norm_target = name.replace(",", "").lower()
+    for c in candidates:
+        if c["name"].replace(",", "").lower() == norm_target:
+            return c["name"]
     return None
 
 
