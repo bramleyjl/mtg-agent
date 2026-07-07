@@ -52,6 +52,8 @@ def _ensure_indexes() -> None:
     _create_index(db["scryfall_bulk"], [("name", ASCENDING)])
     _create_index(db["scryfall_bulk"], [("oracle_id", ASCENDING)])
     _create_index(db["scryfall_oracle_tags"], [("id", ASCENDING)], unique=True)
+    _create_index(db["scryfall_oracle_tags"], [("taggings.oracle_id", ASCENDING)])
+    _create_index(db["scryfall_oracle_tags"], [("label", TEXT), ("description", TEXT)])
     _create_index(db["scryfall_rulings"], [("oracle_id", ASCENDING)], unique=True)
     _create_index(db["rules_numbered"], [("number", ASCENDING)], unique=True)
     _create_index(db["rules_numbered"], [("section", ASCENDING)])
@@ -210,9 +212,120 @@ def get_card_rulings(oracle_id: str) -> list[dict[str, Any]]:
     return doc["rulings"] if doc else []
 
 
-def get_card_oracle_tags(oracle_id: str) -> dict[str, Any] | None:
-    """Return Scryfall oracle tag entry for a card by oracle_id."""
-    return get_db()["scryfall_oracle_tags"].find_one({"oracle_id": oracle_id}, {"_id": 0})
+_TAG_WEIGHT_RANK = {"very_strong": 0, "strong": 1, "median": 2, "low": 3}
+
+
+def _sort_tag_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(hits, key=lambda h: (_TAG_WEIGHT_RANK.get(h["weight"], 9), h["label"]))
+
+
+def get_tags_for_oracle_ids(
+    oracle_ids: list[str], gameplay_only: bool = True
+) -> dict[str, list[dict[str, Any]]]:
+    """
+    Batch reverse-lookup: oracle_id -> [{label, weight}, ...] (sorted by weight,
+    strongest first), scanning scryfall_oracle_tags.taggings for the given ids.
+    gameplay_only=True (default) drops trivia/flavor/reprint-cycle tags — see
+    mtg_agent.tag_filters.is_gameplay_tag.
+    """
+    if not oracle_ids:
+        return {}
+    from mtg_agent.tag_filters import is_gameplay_tag
+
+    by_id: dict[str, list[dict[str, Any]]] = {oid: [] for oid in oracle_ids}
+    cursor = get_db()["scryfall_oracle_tags"].find(
+        {"taggings.oracle_id": {"$in": oracle_ids}},
+        {"_id": 0, "slug": 1, "label": 1, "taggings": 1},
+    )
+    for tag in cursor:
+        if gameplay_only and not is_gameplay_tag(tag["slug"]):
+            continue
+        for tagging in tag["taggings"]:
+            oid = tagging.get("oracle_id")
+            if oid in by_id:
+                by_id[oid].append({"label": tag["label"], "weight": tagging.get("weight", "median")})
+
+    return {oid: _sort_tag_hits(hits) for oid, hits in by_id.items()}
+
+
+def get_tags_for_oracle_id(oracle_id: str, gameplay_only: bool = True) -> list[dict[str, Any]]:
+    """Single-card convenience wrapper around get_tags_for_oracle_ids()."""
+    return get_tags_for_oracle_ids([oracle_id], gameplay_only=gameplay_only).get(oracle_id, [])
+
+
+def search_tags(query: str, gameplay_only: bool = True, limit: int = 25) -> list[dict[str, Any]]:
+    """
+    Search Scryfall tag labels/descriptions by keyword. Ranks whole-word matches
+    (e.g. "ramp" matching "land ramp") above plain substring matches (e.g. "ramp"
+    inside "gives trample") so common query words don't get buried. Use this to
+    discover a tag's exact slug before calling get_cards_by_tag().
+    """
+    from mtg_agent.tag_filters import is_gameplay_tag
+
+    pattern = re.compile(re.escape(query), re.IGNORECASE)
+    word_pattern = re.compile(rf"(^|[\s-]){re.escape(query)}($|[\s-])", re.IGNORECASE)
+    cursor = get_db()["scryfall_oracle_tags"].find(
+        {"$or": [{"label": pattern}, {"slug": pattern}]},
+        {"_id": 0, "label": 1, "slug": 1, "description": 1, "taggings": 1},
+    ).limit(500)
+
+    candidates = []
+    for tag in cursor:
+        if gameplay_only and not is_gameplay_tag(tag["slug"]):
+            continue
+        is_word_match = bool(word_pattern.search(tag["label"]) or word_pattern.search(tag["slug"]))
+        candidates.append((
+            0 if is_word_match else 1,
+            {
+                "label": tag["label"],
+                "slug": tag["slug"],
+                "description": tag.get("description"),
+                "card_count": len(tag["taggings"]),
+            },
+        ))
+
+    candidates.sort(key=lambda c: (c[0], -c[1]["card_count"]))
+    return [c[1] for c in candidates[:limit]]
+
+
+def get_cards_by_tag(tag: str, gameplay_only: bool = True, limit: int = 200) -> dict[str, Any]:
+    """
+    Return all cards carrying a given tag (exact label or slug match, case-insensitive),
+    joined against scryfall_oracle for names, sorted by weight then name.
+    """
+    pattern = re.compile(f"^{re.escape(tag)}$", re.IGNORECASE)
+    doc = get_db()["scryfall_oracle_tags"].find_one(
+        {"$or": [{"label": pattern}, {"slug": pattern}]},
+        {"_id": 0, "label": 1, "slug": 1, "description": 1, "taggings": 1},
+    )
+    if not doc:
+        return {"error": f"No tag found matching '{tag}'. Try search_tags() to find the right slug."}
+    if gameplay_only:
+        from mtg_agent.tag_filters import is_gameplay_tag
+        if not is_gameplay_tag(doc["slug"]):
+            return {"error": f"'{doc['label']}' is filtered out as a non-gameplay tag."}
+
+    oracle_ids = [t["oracle_id"] for t in doc["taggings"]]
+    weight_by_id = {t["oracle_id"]: t.get("weight", "median") for t in doc["taggings"]}
+    names = get_db()["scryfall_oracle"].find(
+        {"oracle_id": {"$in": oracle_ids}}, {"_id": 0, "oracle_id": 1, "name": 1}
+    )
+    name_by_id = {c["oracle_id"]: c["name"] for c in names}
+
+    cards = [
+        {"name": name_by_id.get(oid, oid), "oracle_id": oid, "weight": weight_by_id[oid]}
+        for oid in oracle_ids
+        if oid in name_by_id
+    ]
+    cards.sort(key=lambda c: (_TAG_WEIGHT_RANK.get(c["weight"], 9), c["name"]))
+
+    return {
+        "label": doc["label"],
+        "slug": doc["slug"],
+        "description": doc.get("description"),
+        "total_cards": len(cards),
+        "cards": cards[:limit],
+    }
 
 
 def get_rule(number: str) -> dict[str, Any] | None:
