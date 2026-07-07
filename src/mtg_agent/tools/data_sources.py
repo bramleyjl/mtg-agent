@@ -10,6 +10,7 @@ from mtg_agent.scripts import (
     refresh_commander_spellbook,
     refresh_comprehensive_rules,
     refresh_deck_working_notes,
+    refresh_edhrec,
     refresh_scryfall_bulk,
 )
 
@@ -27,6 +28,7 @@ _SOURCES = [
     ("commander_spellbook_combos", lambda force: refresh_commander_spellbook.refresh(force=force)),
     ("commander_spellbook_templates", lambda force: refresh_commander_spellbook.refresh_templates(force=force)),
     ("deck_working_notes", lambda force: refresh_deck_working_notes.refresh(force=force)),
+    ("edhrec", lambda force: refresh_edhrec.refresh(force=force)),
 ]
 
 

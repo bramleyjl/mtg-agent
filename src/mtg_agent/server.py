@@ -10,7 +10,7 @@ from mtg_agent.clients.moxfield import parse_deck_name
 from mtg_agent.config import load_config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import init_db
-from mtg_agent.tools import cards, combos, data_sources, decks, probability, tags
+from mtg_agent.tools import cards, combos, data_sources, decks, edhrec, probability, tags
 
 config = load_config()
 init_db(config.mongodb_uri, config.mongodb_db)
@@ -105,7 +105,8 @@ async def refresh_all_data_sources(force: bool = False) -> list[dict]:
     """
     Refresh every ingested data source (Scryfall bulk data, Comprehensive Rules,
     Commander banned list, Commander Brackets/Game Changers, both WotC announcement
-    feeds, and Commander Spellbook combos + templates) in one call.
+    feeds, Commander Spellbook combos + templates, per-deck working notes
+    reconciliation, and EDHREC card usage/synergy data) in one call.
 
     force=False (default) mirrors the nightly cron: each source only refreshes if
     past its own staleness window, and most calls will report "fresh, nothing to do".
@@ -158,6 +159,35 @@ async def find_almost_combos(slug: str, max_missing: int = 1) -> dict:
     be prioritized by "most popular combo for the fewest missing cards".
     """
     return await combos.find_almost_combos(slug, config, max_missing=max_missing)
+
+
+@mcp.tool()
+async def compare_deck_to_edhrec(slug: str, scope: str = "default") -> dict:
+    """
+    Gap-analysis against EDHREC's per-commander data: which of the deck's own
+    cards are staples for this commander+scope, and which popular cards it's
+    missing. scope is one of "default", "bracket_2", "bracket_3", "bracket_4",
+    or "tag:<slug>" (fetch a tag scope first via get_edhrec_tag_data()).
+
+    Each card includes synergy (EDHREC's synergy score, positive = more played
+    with this commander than baserate) and inclusion_pct (% of that scope's
+    decks running it). Missing cards are capped at the top 25 by deck count.
+    """
+    return await edhrec.compare_deck_to_edhrec(slug, config, scope=scope)
+
+
+@mcp.tool()
+async def get_edhrec_tag_data(slug: str, tag: str) -> dict:
+    """
+    Fetch a commander's tag/theme-scoped EDHREC page on demand (e.g. tag="Artifacts"
+    or tag="Combo") and compare it against the deck, same shape as
+    compare_deck_to_edhrec(). Use get_deck_full() or ask about a specific
+    commander's tag_counts (via edhrec_commander_meta) to see what tags exist.
+
+    Once fetched, this tag scope is stored and picked up automatically by future
+    weekly EDHREC refreshes — no need to re-fetch it manually again later.
+    """
+    return await edhrec.get_edhrec_tag_data(slug, tag, config)
 
 
 @mcp.tool()

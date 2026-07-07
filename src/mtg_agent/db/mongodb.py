@@ -67,6 +67,17 @@ def _ensure_indexes() -> None:
     _create_index(db["commander_combos"], [("uses.oracle_id", ASCENDING)])
     _create_index(db["commander_spellbook_templates"], [("template_id", ASCENDING)], unique=True)
     _create_index(db["commander_spellbook_templates"], [("oracle_ids", ASCENDING)])
+    _create_index(
+        db["card_usage_stats"],
+        [("commander_oracle_id", ASCENDING), ("oracle_id", ASCENDING), ("scope", ASCENDING)],
+        unique=True,
+    )
+    _create_index(db["card_usage_stats"], [("oracle_id", ASCENDING)])
+    _create_index(
+        db["edhrec_commander_meta"],
+        [("commander_oracle_id", ASCENDING), ("scope", ASCENDING)],
+        unique=True,
+    )
     # Structured-document tier: already atomic at ingestion, just full-text-index in place.
     _create_index(db["rules_numbered"], [("title", TEXT), ("text", TEXT)])
     _create_index(db["rules_glossary"], [("term", TEXT), ("definition", TEXT)])
