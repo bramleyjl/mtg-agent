@@ -307,4 +307,12 @@ Extends the 2026-07-07 build above with a `type` field and conservative auto-gen
 - **`content_type` as schema concept**: resolved 2026-07-07 — documentation-level grouping only (`CATEGORY_CONTENT_TYPE` lookup, not a stored field). See above.
 - **Short-form/social-media chunking architecture (4th tier)**: deferred 2026-07-07 until after long-form primer/article ingestion lands. See deferral note above.
 - Where's the line between "EDHREC synergy data" and "other people's decklists" when EDHREC recs are themselves derived from aggregated decklists?
-- Priority order for the remaining planned CW sources (other decklists / Commander's Herald / future primers / player_theory) — which unblocks the most useful agent behavior first?
+
+## Priority order — resolved 2026-07-12
+
+1. **`working_notes` creation/discussion for all 13 decks** — filling out the per-deck analysis journal (theme, strengths/weaknesses, restraints, current focus, recurring patterns, turns-to-win, similar decklists) conversationally, one deck at a time. Not a data-source build — the write path (`update_deck_working_notes`) and manual-edit reconciliation cron already exist; this is populating actual content across all 13 decks.
+2. **Scryfall Tagger filter curation session** — review a wider sample of tags/decks and tighten `is_gameplay_tag()`'s denylist beyond the single-deck (Titania) spot check it was built from. Also unblocks the reference-decklists auto-tag quality gap (generic tags like "activated ability" currently drown out archetype-shaped ones).
+3. **Reference decklists — final phases** — Phase 3 (CLI tag refinement tool, `tune_reference_deck_tags`) and Phase 4 (comparison tools: `compare_deck_to_reference`, `compare_deck_to_reference_group`), plus the still-missing MCP read layer over `reference_decklists`.
+4. **Well-organized/effortful Reddit posts** (`content_chunks`, `category: reddit_post`) — long deck-tech posts, distinct from short-form Reddit comments (still deferred/post-MVP).
+
+Everything else on this page (Reddit comments, Discord messages, personal game recaps as CW text, embedding-based semantic search) is post-MVP — revisit after the above four land.
