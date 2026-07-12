@@ -6,6 +6,7 @@ const syncBtn    = document.getElementById("syncBtn");
 const serverInput = document.getElementById("serverUrl");
 const localInput  = document.getElementById("localUrl");
 const sourceUrlInput = document.getElementById("sourceUrl");
+const deckTypeInput = document.getElementById("deckType");
 
 function setStatus(msg, type = "") {
   statusEl.textContent = msg;
@@ -41,19 +42,26 @@ async function init() {
     return;
   }
 
+  sourceUrlInput.value = tab.url;
+
   setStatus("Ready to sync deck.");
   syncBtn.disabled = false;
   syncBtn.addEventListener("click", () => syncDeck(slug));
 }
 
-async function postToServer(url, moxfieldId, deckData, sourceUrl) {
+async function postToServer(url, moxfieldId, deckData, sourceUrl, deckType) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   try {
     const res = await fetch(`${url}/sync-deck`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ moxfield_id: moxfieldId, deck_data: deckData, source_url: sourceUrl || undefined }),
+      body: JSON.stringify({
+        moxfield_id: moxfieldId,
+        deck_data: deckData,
+        source_url: sourceUrl || undefined,
+        type: deckType || undefined,
+      }),
       signal: controller.signal,
     });
     const result = await res.json();
@@ -107,8 +115,12 @@ async function syncDeck(slug) {
   setStatus(`Syncing to ${targets.map(t => t.label).join(" & ")}...`);
 
   const sourceUrl = sourceUrlInput.value.trim();
+  const deckType = deckTypeInput.value;
   const results = await Promise.allSettled(
-    targets.map(t => postToServer(t.url, moxfieldId, deckData, sourceUrl).then(r => ({ ...r, _label: t.label })))
+    targets.map(t =>
+      postToServer(t.url, moxfieldId, deckData, sourceUrl, deckType)
+        .then(r => ({ ...r, _label: t.label }))
+    )
   );
 
   const lines = [];
@@ -121,7 +133,7 @@ async function syncDeck(slug) {
       const name  = r.name || r.synced || r.skipped || "?";
       const title = r.title ? ` — ${r.title}` : "";
       const suffix = r.skipped ? " (already up to date)" : ` (${r.card_count ?? "?"} cards)`;
-      const kind = r.owner_username !== undefined ? " [reference deck]" : "";
+      const kind = r.owner_username !== undefined ? ` [reference: ${r.type || "untyped"}]` : "";
       lines.push(`${label}: ${name}${title}${suffix}${kind}`);
       successCount++;
     } else {

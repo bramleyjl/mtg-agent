@@ -614,6 +614,8 @@ async def http_sync_deck(request: Request) -> JSONResponse:
     moxfield_id = body.get("moxfield_id")
     deck_data = body.get("deck_data")
     source_url = body.get("source_url") or None
+    ref_deck_type = body.get("type") or None
+    ref_owner_username = body.get("owner_username") or None
 
     if not moxfield_id or not deck_data:
         return _json_response({"error": "Missing moxfield_id or deck_data"}, status_code=400)
@@ -633,7 +635,12 @@ async def http_sync_deck(request: Request) -> JSONResponse:
     )
 
     if is_reference_deck:
-        result = await reference_decks.sync_reference_deck(deck_data, source_url=source_url)
+        result = await reference_decks.sync_reference_deck(
+            deck_data,
+            source_url=source_url,
+            deck_type=ref_deck_type,
+            owner_username=ref_owner_username,
+        )
         status = 500 if "error" in result else 200
         return _json_response(result, status_code=status)
 

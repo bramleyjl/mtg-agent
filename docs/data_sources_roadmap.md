@@ -268,6 +268,34 @@ Add this dict alongside `chunk_text()` only once something actually needs to fil
 ```
 Unique index on `moxfield_id`; secondary index on `source_url` (so "all decklists this article linked" is a single query once article ingestion exists).
 
+### Reference decklists Phase 1+2 — typed schema + auto-tags, built and verified live 2026-07-10
+
+Extends the 2026-07-07 build above with a `type` field and conservative auto-generated `strategy_tags`, per the MVP plan's 3-type schema (`opponent_meta` / `design_exemplar` / `primer_reference`).
+
+**Schema addition:**
+```json
+{
+  ...,
+  "type": "opponent_meta" | "design_exemplar" | "primer_reference" | null,
+  "strategy_tags": ["..."]
+}
+```
+
+**`generate_strategy_tags()` (`tools/reference_decks.py`)** — reuses existing Scryfall Tagger data already attached to each mainboard card (`entry["scryfall_tags"]`, from `mongodb.get_tags_for_oracle_ids()`) rather than reimplementing oracle-text pattern matching: counts tag frequency across the mainboard, keeps labels appearing on 5+ cards, returns top 5. Regenerated on every sync (no backfill/migration needed when the logic improves — just re-sync).
+
+**Extension (`chrome_extension/popup.html`/`popup.js`)** gained a deck-type dropdown (blank = "don't change the stored type," not "unset it" — confirmed via a deliberate blank re-sync 2026-07-10) and now defaults `source_url` to the current Moxfield tab's URL instead of requiring manual entry (still overridable to point at an article). `owner_username` is *not* a manual field — it's already auto-derived server-side from `createdByUser`, confirmed correct against a real payload.
+
+**Bug fixed 2026-07-10:** the "already up to date" skip path (when `moxfield_updated_at` is unchanged) used to return early before ever applying new `source_url`/`type`/`owner_username` values from a re-sync — a re-sync done purely to attach metadata silently did nothing. Fixed via `mongodb.update_reference_decklist_metadata()`, applied inside the skip branch without redoing card enrichment.
+
+**Verified live 2026-07-10:** Cam's Myrkul B2 ("Eldritch Enchantment," `owner_username: cptkitsune`, moxfield_id `towXSZizDEe_N-G_lTa0rw`) synced as `opponent_meta` with `source_url` auto-populated and `strategy_tags` generated from real Scryfall Tagger data.
+
+**Known gap, deliberately deferred:** the top-5-by-frequency tag selection currently surfaces overly generic mechanical tags (e.g. "activated ability," "triggered ability") over archetype-shaped ones (e.g. reanimation/graveyard-recursion), since broad tags trivially clear the 5-card threshold. Blocked on the general outstanding Scryfall-tag filtering/sorting work (an archetype-vs-mechanical-property distinction beyond `tag_filters.py`'s current gameplay-only filter) — not a reference-decklists-specific fix. Re-sync affected decks once that lands to regenerate tags.
+
+**Not yet built (post-Phase 2, still open):**
+- **Phase 3 — CLI tag refinement tool** (`tune_reference_deck_tags(moxfield_id)`): surface a deck's auto-tags to John for approve/modify/delete, then persist via `mongodb.update_reference_decklist_tags()` (already built, unused).
+- **Phase 4 — comparison tools**: `compare_deck_to_reference(my_slug, ref_moxfield_id)` for `opponent_meta` power-level/effect-density comparisons; `compare_deck_to_reference_group(my_slug, commander_name, type="design_exemplar")` for card-inclusion-pattern analysis against multiple exemplars. `mongodb.get_reference_decklists_by_type()`/`get_reference_decklists_by_commander()` (already built, unused) are the query layer these would sit on.
+- No MCP read tool over `reference_decklists` exists yet at all beyond raw Mongo lookups — same gap noted in the 2026-07-07 entry above, still open.
+
 **Source-article linking — built and populated.** The extension's popup gained an optional "source URL / note" text field; whatever's typed there is sent as `source_url` in the `/sync-deck` POST body and stored verbatim (no automatic capture — the extension only sees the Moxfield tab, not whatever tab the article was read in — John pasted the article URL by hand for both decks). This is now the confirmed join key against the `strategy_article`/`primer` CW category (see below): both decks and the article chunk share `source_url: "https://www.airza.net/2023/08/20/ursine-madness"`.
 
 **Not yet built:** any MCP read tool over `reference_decklists` (e.g. "what decks did this article link" or "how does my Breya list compare to this reference build") — the ingestion path itself is validated (real extension sync, both decks confirmed correctly routed and stored), but nothing queries this collection yet beyond raw Mongo lookups.

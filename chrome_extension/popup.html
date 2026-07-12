@@ -59,8 +59,17 @@
   <h1>MTG Agent Sync</h1>
   <div id="status">Checking page...</div>
   <div class="settings" style="margin-bottom: 8px;">
-    <label for="sourceUrl">Source URL / note (optional)</label>
+    <label for="sourceUrl">Source URL (defaults to this Moxfield page — edit to point at the article this deck was linked from instead)</label>
     <input id="sourceUrl" type="text" placeholder="e.g. article this deck was linked from">
+  </div>
+  <div class="settings" style="margin-bottom: 8px;">
+    <label for="deckType">Reference deck type (if not your own)</label>
+    <select id="deckType">
+      <option value="">— not a reference deck / let server decide —</option>
+      <option value="opponent_meta">Opponent meta (recurring opponent's deck)</option>
+      <option value="design_exemplar">Design exemplar (reference build for your commander)</option>
+      <option value="primer_reference">Primer reference (general/linked from article)</option>
+    </select>
   </div>
   <button id="syncBtn" disabled>Sync Deck</button>
   <details>

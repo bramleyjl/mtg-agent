@@ -95,6 +95,8 @@ def _ensure_indexes() -> None:
     # Notion/decks.yaml involvement.
     _create_index(db["reference_decklists"], [("moxfield_id", ASCENDING)], unique=True)
     _create_index(db["reference_decklists"], [("source_url", ASCENDING)])
+    _create_index(db["reference_decklists"], [("type", ASCENDING)])
+    _create_index(db["reference_decklists"], [("commanders.name", ASCENDING)])
 
 
 def upsert_deck(slug: str, data: dict[str, Any]) -> None:
@@ -123,6 +125,30 @@ def upsert_reference_decklist(moxfield_id: str, data: dict[str, Any]) -> None:
 
 def get_reference_decklist(moxfield_id: str) -> dict[str, Any] | None:
     return get_db()["reference_decklists"].find_one({"moxfield_id": moxfield_id}, {"_id": 0})
+
+
+def get_reference_decklists_by_type(deck_type: str) -> list[dict[str, Any]]:
+    return list(get_db()["reference_decklists"].find({"type": deck_type}, {"_id": 0}))
+
+
+def get_reference_decklists_by_commander(
+    commander_name: str, deck_type: str = "design_exemplar"
+) -> list[dict[str, Any]]:
+    return list(
+        get_db()["reference_decklists"].find(
+            {"commanders.name": commander_name, "type": deck_type}, {"_id": 0}
+        )
+    )
+
+
+def update_reference_decklist_tags(moxfield_id: str, new_tags: list[str]) -> None:
+    get_db()["reference_decklists"].update_one(
+        {"moxfield_id": moxfield_id}, {"$set": {"strategy_tags": new_tags}}
+    )
+
+
+def update_reference_decklist_metadata(moxfield_id: str, fields: dict[str, Any]) -> None:
+    get_db()["reference_decklists"].update_one({"moxfield_id": moxfield_id}, {"$set": fields})
 
 
 def upsert_game_record(record: dict[str, Any]) -> None:
