@@ -1,0 +1,3 @@
+{
+  "server_host_permission": "http://YOUR_SERVER_IP:8765/*"
+}

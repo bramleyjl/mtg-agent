@@ -97,6 +97,11 @@ def _ensure_indexes() -> None:
     _create_index(db["reference_decklists"], [("source_url", ASCENDING)])
     _create_index(db["reference_decklists"], [("type", ASCENDING)])
     _create_index(db["reference_decklists"], [("commanders.name", ASCENDING)])
+    # DeckCheck AI-analysis sync: per-deck field lives on `decks` itself (see
+    # sync_deckcheck_analysis in tools/decks.py); this collection only tracks
+    # syncs that couldn't be matched to a deck, surfaced at CLI session start.
+    _create_index(db["decks"], [("commanders.name", ASCENDING)])
+    _create_index(db["deckcheck_sync_failures"], [("acknowledged", ASCENDING)])
 
 
 def upsert_deck(slug: str, data: dict[str, Any]) -> None:
@@ -114,6 +119,24 @@ def get_deck_by_notion_id(notion_id: str) -> dict[str, Any] | None:
 
 def get_deck_by_moxfield_id(moxfield_id: str) -> dict[str, Any] | None:
     return decks().find_one({"moxfield_id": moxfield_id}, {"_id": 0})
+
+
+def get_deck_by_commander_name(commander_name: str) -> dict[str, Any] | None:
+    return decks().find_one({"commanders.name": commander_name}, {"_id": 0})
+
+
+def log_deckcheck_sync_failure(doc: dict[str, Any]) -> None:
+    doc["logged_at"] = datetime.now(timezone.utc)
+    doc["acknowledged"] = False
+    get_db()["deckcheck_sync_failures"].insert_one(doc)
+
+
+def get_unacknowledged_deckcheck_sync_failures() -> list[dict[str, Any]]:
+    return list(get_db()["deckcheck_sync_failures"].find({"acknowledged": False}, {"_id": 0}))
+
+
+def acknowledge_deckcheck_sync_failures() -> None:
+    get_db()["deckcheck_sync_failures"].update_many({"acknowledged": False}, {"$set": {"acknowledged": True}})
 
 
 def upsert_reference_decklist(moxfield_id: str, data: dict[str, Any]) -> None:

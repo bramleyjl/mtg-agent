@@ -1,4 +1,6 @@
+import re
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -13,6 +15,7 @@ from mtg_agent.clients.notion_mcp import (
 from mtg_agent.config import Config
 from mtg_agent.db import mongodb
 from mtg_agent.db.mongodb import get_bulk_card, get_printing_by_id, get_prices_by_scryfall_ids
+from mtg_agent.tools.combos import find_combos_in_deck, render_combos_section
 
 
 def _cmp(name: str) -> str:
@@ -385,17 +388,7 @@ async def get_deck(slug: str, config: Config) -> dict | None:
     return _slim_deck(stored)
 
 
-async def update_deck_working_notes(slug: str, notes: str, config: Config) -> dict:
-    """
-    Write a deck's per-deck working-notes document (theme, strengths/weaknesses,
-    restraints, current focus, recurring patterns, turns-to-win, similar decklists)
-    to its Notion page body, and mirror the same content into MongoDB's
-    `working_notes` field in the same call — Notion is the source of truth, Mongo
-    is a read-optimized copy kept in lockstep with every agent-driven write.
-
-    Manual edits made directly in Notion (bypassing this function) are not caught
-    here — those are reconciled separately by the refresh_deck_working_notes cron.
-    """
+async def _write_working_notes(slug: str, notes: str, config: Config) -> dict:
     stored = mongodb.get_deck(slug)
     if not stored:
         return {"error": f"Deck '{slug}' not yet synced. Run sync_deck('{slug}') first."}
@@ -413,6 +406,128 @@ async def update_deck_working_notes(slug: str, notes: str, config: Config) -> di
         {"$set": {"working_notes": notes, "working_notes_synced_at": synced_at}},
     )
     return {"slug": slug, "updated": True, "working_notes_synced_at": synced_at.isoformat()}
+
+
+async def update_deck_working_notes(slug: str, notes: str, config: Config) -> dict:
+    """
+    Write a deck's per-deck working-notes document (theme, strengths/weaknesses,
+    restraints, current focus, recurring patterns, turns-to-win, combos, similar
+    decklists) to its Notion page body, and mirror the same content into MongoDB's
+    `working_notes` field in the same call — Notion is the source of truth, Mongo
+    is a read-optimized copy kept in lockstep with every agent-driven write.
+
+    Manual edits made directly in Notion (bypassing this function) are not caught
+    here — those are reconciled separately by the refresh_deck_working_notes cron.
+    The "# Combos" section specifically is machine-maintained by
+    resync_deck_combos()/sync_deck() rather than written here conversationally —
+    avoid hand-authoring its content.
+    """
+    return await _write_working_notes(slug, notes, config)
+
+
+def _splice_section(notes: str, section: str, body: str) -> str:
+    """
+    Replace the content of a top-level `# {section}` heading in a working_notes
+    document with `body`, leaving every other section untouched. If the heading
+    isn't present yet, inserts it before "# Similar Decklists by Other Players"
+    (or appends at the end if that anchor section is also missing).
+    """
+    block = f"# {section}\n\n{body.strip()}\n"
+
+    existing = re.compile(rf"(?ms)^# {re.escape(section)}\s*\n.*?(?=^# |\Z)")
+    if existing.search(notes):
+        return existing.sub(block + "\n", notes, count=1)
+
+    anchor = "# Similar Decklists by Other Players"
+    if anchor in notes:
+        return notes.replace(anchor, f"{block}\n{anchor}", 1)
+
+    return notes.rstrip("\n") + "\n\n" + block
+
+
+async def resync_deck_combos(slug: str, config: Config) -> dict:
+    """
+    Recompute this deck's infinite-combo table from Commander Spellbook data
+    (find_combos_in_deck) and splice the result into the "# Combos" section of
+    its working_notes document, leaving every other section untouched. Called
+    automatically by sync_deck() whenever a deck's card list actually changes;
+    also callable directly to backfill/refresh a deck's Combos section on demand
+    without a full Moxfield resync.
+    """
+    stored = mongodb.get_deck(slug)
+    if not stored:
+        return {"error": f"Deck '{slug}' not yet synced. Run sync_deck('{slug}') first."}
+
+    combo_result = await find_combos_in_deck(slug, config)
+    if "error" in combo_result:
+        return combo_result
+
+    new_notes = _splice_section(
+        stored.get("working_notes") or "", "Combos", render_combos_section(combo_result)
+    )
+    result = await _write_working_notes(slug, new_notes, config)
+    result["combo_count"] = combo_result.get("combo_count", 0)
+    return result
+
+
+async def sync_deckcheck_analysis(
+    deckview_id: str, deck_summary: dict, attribute_ratings: dict
+) -> dict:
+    """
+    Store DeckCheck's AI-generated "second opinion" analysis for one of John's own
+    decks, called by the browser extension's content-script auto-capture whenever
+    John views a deckcheck.co deckview page (see chrome_extension/content_script.js).
+
+    Matches to a deck by commander name (deck_summary["commanders"]) since
+    DeckCheck's deckview id is a per-analysis-run snapshot id, not a stable
+    per-deck identifier — reanalyzing a deck mints a brand-new id each time
+    (confirmed 2026-07-13/14), so there's no stable key to upsert on directly.
+
+    Only overwrites the deck's stored deckcheck_analysis if this snapshot's
+    last_analyzed is newer than what's already stored, so revisiting an old
+    bookmarked deckview link can't regress fresher data with a stale one.
+
+    Unmatched commanders are logged to deckcheck_sync_failures (surfaced at the
+    next `claude` CLI session start in this repo — see .claude/settings.json)
+    rather than raised, since a bad extension payload shouldn't be a hard error.
+    """
+    commander_names = deck_summary.get("commanders") or []
+    stored = None
+    for name in commander_names:
+        stored = mongodb.get_deck_by_commander_name(name)
+        if stored:
+            break
+
+    if not stored:
+        mongodb.log_deckcheck_sync_failure({
+            "deckview_id": deckview_id,
+            "commanders": commander_names,
+            "reason": "no matching deck for commander(s)",
+        })
+        return {"error": f"No matching deck for commander(s): {commander_names}"}
+
+    existing = (stored.get("deckcheck_analysis") or {}).get("last_analyzed")
+    incoming = deck_summary.get("last_analyzed")
+    if existing and incoming:
+        # DeckCheck returns last_analyzed as an RFC 2822 HTTP-date string
+        # (e.g. "Wed, 17 Jun 2026 15:03:05 GMT") — parse before comparing,
+        # since it doesn't sort correctly as a plain string.
+        if parsedate_to_datetime(incoming) <= parsedate_to_datetime(existing):
+            return {"slug": stored["slug"], "updated": False, "reason": "not newer than stored analysis"}
+
+    mongodb.upsert_deck(stored["slug"], {
+        "deckcheck_analysis": {
+            "analysis_preview": deck_summary.get("analysis_preview"),
+            "bracket_level": deck_summary.get("bracket_level"),
+            "performance_index": deck_summary.get("performance_index"),
+            "attribute_ratings": attribute_ratings.get("attribute_ratings"),
+            "bracket_description": deck_summary.get("bracket_description"),
+            "deckview_id": deckview_id,
+            "deckview_url": f"https://deckcheck.co/app/deckview/{deckview_id}",
+            "last_analyzed": incoming,
+        }
+    })
+    return {"slug": stored["slug"], "updated": True}
 
 
 async def get_deck_full(slug: str, config: Config) -> dict | None:
@@ -644,6 +759,16 @@ async def sync_deck(slug: str, config: Config, prefetched_data: dict | None = No
         update_results["notion"] = "skipped — no notion_id (deck not in decks.yaml)"
     else:
         update_results["notion"] = "skipped — NOTION_MCP_URL not set"
+
+    if notion_id and config.notion_mcp_url:
+        try:
+            combo_sync = await resync_deck_combos(slug, config)
+            update_results["combos"] = (
+                f"synced ({combo_sync.get('combo_count', 0)} found)"
+                if combo_sync.get("updated") else f"error: {combo_sync.get('error')}"
+            )
+        except Exception as e:
+            update_results["combos"] = f"error: {e}"
 
     return {
         "synced": slug,

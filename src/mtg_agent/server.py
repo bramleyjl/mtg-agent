@@ -51,7 +51,11 @@ async def get_deck(slug: str) -> dict | None:
 async def get_deck_full(slug: str) -> dict | None:
     """
     Retrieve full deck context: complete Scryfall card data (oracle text, mana cost,
-    type line, etc.) plus structured game history from MongoDB.
+    type line, etc.) plus structured game history from MongoDB. Also includes
+    `deckcheck_analysis` if the browser extension has auto-captured a DeckCheck.co
+    AI analysis for this deck (analysis_preview, bracket_level, performance_index,
+    attribute_ratings, deckview_url) — a "second opinion" reference, not
+    authoritative over Moxfield's bracket_official or John's own nuanced bracket.
 
     Prefer get_deck() for lightweight queries; use this only when card text or
     game history is needed.
@@ -63,10 +67,12 @@ async def get_deck_full(slug: str) -> dict | None:
 async def update_deck_working_notes(slug: str, notes: str) -> dict:
     """
     Write a deck's working-notes document (theme/strategy, strengths, weaknesses,
-    restraints, current focus, recurring patterns, turns-to-win, similar decklists)
-    to its Notion page body, mirroring the same content into MongoDB in the same
-    call. Use get_deck_full() to read the current notes back (returned as
-    `working_notes`). Always call out what changed when writing — never a silent edit.
+    restraints, current focus, recurring patterns, turns-to-win, combos, similar
+    decklists) to its Notion page body, mirroring the same content into MongoDB in
+    the same call. Use get_deck_full() to read the current notes back (returned as
+    `working_notes`). Always call out what changed when writing — never a silent
+    edit. The "# Combos" section is machine-maintained by resync_deck_combos()/
+    sync_deck() — don't hand-author its content here.
     """
     return await decks.update_deck_working_notes(slug, notes, config)
 
@@ -236,8 +242,11 @@ async def find_combos_in_deck(slug: str) -> dict:
 
     Returns combos sorted by popularity (EDHREC-derived inclusion count), with
     popularity_percentile giving that raw count context against the full ingested
-    combo corpus. See find_almost_combos() for combos the deck is close to but
-    hasn't fully completed yet.
+    combo corpus, and identity_percentile giving the same rank scoped to only
+    combos this deck's colors could ever assemble (fairer than the unscoped
+    percentile, which just rewards combos needing fewer colors). See
+    find_almost_combos() for combos the deck is close to but hasn't fully
+    completed yet.
     """
     return await combos.find_combos_in_deck(slug, config)
 
@@ -257,10 +266,23 @@ async def find_almost_combos(slug: str, max_missing: int = 1) -> dict:
 
     Each result lists its missing piece(s) by name, flags commander_change_required
     on any missing piece that must be the commander (a bigger ask than adding a
-    card to the 99), and includes popularity/popularity_percentile so results can
-    be prioritized by "most popular combo for the fewest missing cards".
+    card to the 99), and includes popularity/popularity_percentile/identity_percentile
+    so results can be prioritized by "most popular combo for the fewest missing cards".
     """
     return await combos.find_almost_combos(slug, config, max_missing=max_missing)
+
+
+@mcp.tool()
+async def resync_deck_combos(slug: str) -> dict:
+    """
+    Recompute this deck's infinite-combo table (via find_combos_in_deck) and
+    write it into the "# Combos" section of the deck's working_notes document,
+    leaving every other section untouched. sync_deck() already calls this
+    automatically whenever a deck's card list actually changes (skipped on its
+    "already up to date" short-circuit path) — use this directly only to
+    backfill/refresh a deck's Combos section without a full Moxfield resync.
+    """
+    return await decks.resync_deck_combos(slug, config)
 
 
 @mcp.tool()
@@ -661,6 +683,39 @@ async def http_sync_deck(request: Request) -> JSONResponse:
             result["game_history"] = await decks.sync_game_history(slug, config)
         except Exception as e:
             result["game_history"] = f"error: {e}"
+    status = 500 if "error" in result else 200
+    return _json_response(result, status_code=status)
+
+
+@mcp.custom_route("/sync-deckcheck-analysis", methods=["POST", "OPTIONS"])
+async def http_sync_deckcheck_analysis(request: Request) -> JSONResponse:
+    """
+    HTTP endpoint for the browser extension's DeckCheck auto-capture (see
+    chrome_extension/content_script.js + background.js). Fires whenever John
+    views a deckcheck.co deckview page — no manual sync click involved.
+
+    Body: {
+      "deckview_id": "...",
+      "deck_summary": { ...raw GET /api/dc3/deck-summary/{id} response... },
+      "attribute_ratings": { ...raw GET /api/dc3/deck-stats/{id}?stats=attribute_ratings response... }
+    }
+    """
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_CORS_HEADERS)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _json_response({"error": "Invalid JSON body"}, status_code=400)
+
+    deckview_id = body.get("deckview_id")
+    deck_summary = body.get("deck_summary")
+    attribute_ratings = body.get("attribute_ratings")
+
+    if not deckview_id or not deck_summary:
+        return _json_response({"error": "Missing deckview_id or deck_summary"}, status_code=400)
+
+    result = await decks.sync_deckcheck_analysis(deckview_id, deck_summary, attribute_ratings or {})
     status = 500 if "error" in result else 200
     return _json_response(result, status_code=status)
 

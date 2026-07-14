@@ -1,3 +1,5 @@
+import bisect
+
 from mtg_agent.config import Config
 from mtg_agent.db import mongodb
 
@@ -18,6 +20,30 @@ def _deck_oracle_ids(deck: dict) -> tuple[set[str], set[str], dict[str, str]]:
 
 def _load_templates(db) -> dict[str, set[str]]:
     return {t["template_id"]: set(t["oracle_ids"]) for t in db["commander_spellbook_templates"].find()}
+
+
+def _identity_popularity_values(db, deck_colors: set[str]) -> list[int]:
+    """
+    Sorted popularity values for every commander-legal combo whose color identity
+    fits within deck_colors — the comparison pool for identity_percentile (see
+    _percentile()), scoped to "combos this deck's colors could ever assemble"
+    rather than every combo in the format.
+    """
+    query = {
+        "popularity": {"$type": "number"},
+        "identity": {"$not": {"$elemMatch": {"$nin": list(deck_colors)}}},
+    }
+    values = [c["popularity"] for c in db["commander_combos"].find(query, {"popularity": 1})]
+    values.sort()
+    return values
+
+
+def _percentile(popularity: int | None, sorted_values: list[int]) -> float | None:
+    """Percentile rank of popularity against sorted_values, same formula as ingestion's popularity_percentile."""
+    if popularity is None or not sorted_values:
+        return None
+    rank = bisect.bisect_right(sorted_values, popularity)
+    return round(100 * rank / len(sorted_values), 1)
 
 
 def _check_requires(
@@ -57,6 +83,10 @@ async def find_combos_in_deck(slug: str, config: Config) -> dict:
 
     Returns combos sorted by popularity descending. `popularity_percentile` (0-100)
     gives that raw count context against the full ingested combo corpus.
+    `identity_percentile` (0-100) is the same idea but scoped to only combos whose
+    color identity fits within this deck's own colors — a fairer "how popular is
+    this among combos I could actually assemble" comparison, since the unscoped
+    percentile just rewards combos using fewer colors.
     """
     deck_conf = config.decks_by_slug.get(slug)
     if not deck_conf:
@@ -70,8 +100,11 @@ async def find_combos_in_deck(slug: str, config: Config) -> dict:
     if not all_ids:
         return {"slug": slug, "combos": []}
 
+    deck_colors = set(deck.get("colors") or [])
+
     db = mongodb.get_db()
     templates = _load_templates(db)
+    identity_pop_values = _identity_popularity_values(db, deck_colors)
 
     results = []
     for combo in db["commander_combos"].find({"uses.oracle_id": {"$in": list(all_ids)}}):
@@ -96,11 +129,48 @@ async def find_combos_in_deck(slug: str, config: Config) -> dict:
             "description": combo.get("description"),
             "popularity": combo.get("popularity"),
             "popularity_percentile": combo.get("popularity_percentile"),
+            "identity_percentile": _percentile(combo.get("popularity"), identity_pop_values),
             "commander_zone_violations": commander_zone_violations or None,
         })
 
     results.sort(key=lambda r: (-(r["popularity"] or 0)))
     return {"slug": slug, "combo_count": len(results), "combos": results}
+
+
+def render_combos_section(result: dict) -> str:
+    """
+    Render a find_combos_in_deck() result as the markdown body for a deck's
+    working_notes "# Combos" section (see decks.resync_deck_combos()).
+    """
+    note = (
+        "_Auto-populated from Commander Spellbook's combo data on every deck sync "
+        "— regenerated whenever the decklist changes, not manually maintained. "
+        "Popularity is Commander Spellbook's own score (an EDHREC-derived "
+        "inclusion count), not Commander's Herald data. Popularity %ile ranks that "
+        "score against every commander-legal combo in the format; Identity %ile "
+        "ranks it only against combos this deck's colors could ever assemble — a "
+        "fairer read since the unscoped percentile just rewards combos needing "
+        "fewer colors._"
+    )
+    combos = result.get("combos", [])
+    if not combos:
+        return f"{note}\n\nNo infinite combos currently in the decklist (per Commander Spellbook data)."
+
+    def _pct(c: dict, key: str) -> str:
+        value = c.get(key)
+        return f"{value:.1f}" if value is not None else "—"
+
+    rows = "\n".join(
+        "| {cards} | {produces} | {pop_pct} | {id_pct} |".format(
+            cards=" + ".join(c["uses"]),
+            produces="; ".join(p for p in c["produces"] if p),
+            pop_pct=_pct(c, "popularity_percentile"),
+            id_pct=_pct(c, "identity_percentile"),
+        )
+        for c in combos
+    )
+    table = f"| Cards | Produces | Popularity %ile | Identity %ile |\n| --- | --- | --- | --- |\n{rows}"
+    return f"{note}\n\n{table}"
 
 
 async def find_almost_combos(slug: str, config: Config, max_missing: int = 1) -> dict:
@@ -121,6 +191,8 @@ async def find_almost_combos(slug: str, config: Config, max_missing: int = 1) ->
     case: an owned piece that's in the 99 instead of the command zone.
 
     Results are sorted by fewest missing pieces first, then by popularity descending.
+    Each result includes identity_percentile alongside popularity_percentile — see
+    find_combos_in_deck() for what distinguishes the two.
     """
     deck_conf = config.decks_by_slug.get(slug)
     if not deck_conf:
@@ -138,6 +210,7 @@ async def find_almost_combos(slug: str, config: Config, max_missing: int = 1) ->
 
     db = mongodb.get_db()
     templates = _load_templates(db)
+    identity_pop_values = _identity_popularity_values(db, deck_colors)
 
     results = []
     for combo in db["commander_combos"].find({"uses.oracle_id": {"$in": list(all_ids)}}):
@@ -176,6 +249,7 @@ async def find_almost_combos(slug: str, config: Config, max_missing: int = 1) ->
             "description": combo.get("description"),
             "popularity": combo.get("popularity"),
             "popularity_percentile": combo.get("popularity_percentile"),
+            "identity_percentile": _percentile(combo.get("popularity"), identity_pop_values),
             "commander_zone_violations": commander_zone_violations or None,
         })
 
