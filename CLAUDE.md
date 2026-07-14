@@ -40,6 +40,14 @@ Search today is MongoDB `$text` keyword search (self-hosted Community edition do
 - **For actual ingestion, get verbatim text**: ask John for a PDF print of the page (or pasted raw text) and read that directly, rather than relying on WebFetch's paraphrase. This matters because direct quotes and precise phrasing are often exactly what makes a chunk worth surfacing later.
 - **Work out `title`, `commander_names`, and `topic_tags` collaboratively with John** rather than inferring them solo — `commander_names` is citation-only metadata (which decklist demonstrates the article's ideas), while `topic_tags` (free-form theory/concept tags, e.g. `damage-race-math`, `punish-over-engine`) is the actual cross-archetype retrieval axis and is worth getting right. See `docs/data_sources_roadmap.md`'s "strategy_article / primer" section for the full design rationale (the Wilson/Noble Heritage ↔ Rem Karolus example that motivated this).
 
+## DeckCheck / CRISPI Caveats
+
+DeckCheck.co AI analyses (auto-captured by the browser extension into `decks.deckcheck_analysis`, surfaced via `get_deck_full()`) are a useful second opinion — the hard-rule checks (Game Changers, 2-card combos, extra turns, mass land denial) are reliable, and bracket-level movement between captures is a meaningful signal. But treat the rest with standing skepticism:
+
+- **CRISPI heuristics read card-text symmetry and commander-dependence, not positional strategy.** They are systematically weakest on decks whose power is a play pattern rather than a card package. Canonical example (2026-07-14, documented in Rem Karolus's working notes): DeckCheck rated Rem Karolus (John's 2.9, his strongest official-2 deck) at PI 4.75 — *below* Atemsis (his 2.5) at 6.5 — because it treated Rem's damage-prevention as load-bearing and couldn't see the actual strategy: establish a life lead, then repeatedly cast symmetric burn that is one-sided *in effect* (opponents are lower), with Rem himself expendable after blocking one or two self-burns and single-digit-life wins working as intended. It also can't see playstyle choices with no decklist footprint (e.g. always fetching basics to minimize Price of Progress self-damage).
+- **Individual attribute ratings (consistency/interaction/resilience/speed) are noisy between captures** — a five-card swap once moved Atemsis's consistency 7→4.25 and speed 5→7. Compare bracket level and overall PI across captures; don't over-read single attribute deltas.
+- **Never authoritative over** Moxfield's `bracket_official` or John's own decimal bracket (see the player_theory bracket-philosophy essay). When DeckCheck and John's read disagree, John's read wins and the disagreement itself may be worth recording in that deck's working notes.
+
 ## Commander Format Rules
 
 - 100-card singleton (exactly 1 copy of each card except basic lands)
