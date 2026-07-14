@@ -42,6 +42,7 @@ async function postToServer(serverUrl, payload) {
 }
 
 async function handleDeckviewDetected(deckviewId) {
+  console.log("[mtg-agent] background handling deckviewId", deckviewId);
   try {
     const [deckSummary, attributeRatings] = await Promise.all([
       fetchJson(`${DECKCHECK_API}/api/dc3/deck-summary/${deckviewId}`),
@@ -68,6 +69,7 @@ async function handleDeckviewDetected(deckviewId) {
 }
 
 chrome.runtime.onMessage.addListener((message) => {
+  console.log("[mtg-agent] background received message", message);
   if (message?.type === "deckcheck-analysis-detected" && message.deckviewId) {
     handleDeckviewDetected(message.deckviewId);
   }
