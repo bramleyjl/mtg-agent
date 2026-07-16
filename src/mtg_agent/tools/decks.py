@@ -551,6 +551,33 @@ async def get_deck_full(slug: str, config: Config) -> dict | None:
     return result
 
 
+async def get_deck_notes(slug: str, config: Config) -> dict | None:
+    """
+    Retrieve a deck's working_notes and deckcheck_analysis without the full
+    Scryfall-enriched card list — get_deck_full() on a large deck can return
+    100k+ characters of oracle text/rulings that blow past a tool-result budget
+    when only the notes/analysis are actually needed (e.g. a subagent doing a
+    trim/tweak pass). Combine with get_deck() for the card list.
+    """
+    deck_conf = config.decks_by_slug.get(slug)
+    if not deck_conf:
+        return None
+
+    stored = mongodb.get_deck(slug)
+    if not stored:
+        return {
+            "error": f"Deck '{slug}' not yet synced. Run sync_deck('{slug}') first.",
+        }
+
+    return {
+        "slug": stored.get("slug"),
+        "name": stored.get("name"),
+        "title": stored.get("title"),
+        "working_notes": stored.get("working_notes"),
+        "working_notes_synced_at": stored.get("working_notes_synced_at"),
+        "deckcheck_analysis": stored.get("deckcheck_analysis"),
+    }
+
 
 async def enrich_deck_cards(deck_data: dict) -> dict:
     """

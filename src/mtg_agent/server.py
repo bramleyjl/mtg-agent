@@ -64,6 +64,18 @@ async def get_deck_full(slug: str) -> dict | None:
 
 
 @mcp.tool()
+async def get_deck_notes(slug: str) -> dict | None:
+    """
+    Retrieve just a deck's working_notes and deckcheck_analysis — no card data.
+    Lightweight alternative to get_deck_full() for callers that only need the
+    notes/analysis (e.g. a trim/tweak pass); combine with get_deck() for the
+    card list. get_deck_full() on a large deck can return 100k+ characters of
+    Scryfall oracle text/rulings, which this avoids entirely.
+    """
+    return await decks.get_deck_notes(slug, config)
+
+
+@mcp.tool()
 async def update_deck_working_notes(slug: str, notes: str) -> dict:
     """
     Write a deck's working-notes document (theme/strategy, strengths, weaknesses,

@@ -48,6 +48,10 @@ DeckCheck.co AI analyses (auto-captured by the browser extension into `decks.dec
 - **Individual attribute ratings (consistency/interaction/resilience/speed) are noisy between captures** — a five-card swap once moved Atemsis's consistency 7→4.25 and speed 5→7. Compare bracket level and overall PI across captures; don't over-read single attribute deltas.
 - **Never authoritative over** Moxfield's `bracket_official` or John's own decimal bracket (see the player_theory bracket-philosophy essay). When DeckCheck and John's read disagree, John's read wins and the disagreement itself may be worth recording in that deck's working notes.
 
+## Deck Analyst Subagent
+
+`.claude/agents/deck-analyst.md` packages the deep single-deck trim/tweak review (previously redone ad hoc for Atemsis, Niv-Mizzet, etc.) as a dedicated read-only subagent. Reach for it via the `Agent` tool (`subagent_type: "deck-analyst"`) when John asks to tighten up, trim, or focus an **existing** deck he already knows — not for introducing an unfamiliar decklist from scratch. It anchors its analysis on the deck's already-recorded `working_notes` Weaknesses/Restraints/Current Focus sections (plus any specific ask given that session) and returns paired suggested inclusions & cuts for discussion. It never writes to `working_notes` itself — persisting anything stays a decision made collaboratively with John in the main conversation via `update_deck_working_notes`.
+
 ## Commander Format Rules
 
 - 100-card singleton (exactly 1 copy of each card except basic lands)
