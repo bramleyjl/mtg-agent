@@ -15,6 +15,7 @@ Stale check only:  python -m mtg_agent.scripts.refresh_scryfall_bulk --if-stale
 """
 
 import argparse
+import gzip
 import json
 import sys
 from datetime import datetime, timedelta, timezone
@@ -83,19 +84,20 @@ def _is_stale(dataset: str) -> bool:
 
 
 def _fetch_bulk_uris() -> dict[str, str]:
-    """Return mapping of bulk data type → download_uri from Scryfall."""
+    """Return mapping of bulk data type → jsonl_download_uri from Scryfall."""
     resp = httpx.get(BULK_LIST_URL, timeout=15.0)
     resp.raise_for_status()
-    return {item["type"]: item["download_uri"] for item in resp.json()["data"]}
+    return {item["type"]: item["jsonl_download_uri"] for item in resp.json()["data"]}
 
 
 def _load_json_stream(uri: str) -> list:
-    """Stream-download a bulk JSON file and parse it. Returns the full list."""
+    """Stream-download a gzipped JSONL bulk file and parse it. Returns the full list."""
     print(f"  Downloading {uri.split('/')[-1].split('?')[0]}...", flush=True)
     with httpx.stream("GET", uri, timeout=300.0) as resp:
         resp.raise_for_status()
         raw = b"".join(resp.iter_bytes())
-    return json.loads(raw)
+    lines = gzip.decompress(raw).splitlines()
+    return [json.loads(line) for line in lines if line]
 
 
 def _upsert_batch(collection: str, key: str, batch: list[dict]) -> None:

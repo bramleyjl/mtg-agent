@@ -52,6 +52,10 @@ DeckCheck.co AI analyses (auto-captured by the browser extension into `decks.dec
 
 `.claude/agents/deck-analyst.md` packages the deep single-deck trim/tweak review (previously redone ad hoc for Atemsis, Niv-Mizzet, etc.) as a dedicated read-only subagent. Reach for it via the `Agent` tool (`subagent_type: "deck-analyst"`) when John asks to tighten up, trim, or focus an **existing** deck he already knows — not for introducing an unfamiliar decklist from scratch. It anchors its analysis on the deck's already-recorded `working_notes` Weaknesses/Restraints/Current Focus sections (plus any specific ask given that session) and returns paired suggested inclusions & cuts for discussion. It never writes to `working_notes` itself — persisting anything stays a decision made collaboratively with John in the main conversation via `update_deck_working_notes`.
 
+## Log Game Skill
+
+`.claude/skills/log-game/SKILL.md` packages the post-session game-recording workflow (built 2026-07-23) as a project skill, invoked via `/log-game` or naturally when John wants to record games played. Unlike the deck-analyst subagent, this is a skill rather than a subagent — the workflow is inherently interactive (elicit game details → draft properties + recap → John reviews/edits → write → sync), which fits the main conversation loop better than a delegated single-shot task. Covers: asking about `Seat Order`/`Turn Ended` explicitly (not just what's volunteered), getting exact commander names right (some named legends have multiple distinct real cards sharing a first name), and the mechanics of adding new closed-option `Enemy Commanders`/`Winner` values via `notion-update-data-source` before writing pages.
+
 ## Commander Format Rules
 
 - 100-card singleton (exactly 1 copy of each card except basic lands)
