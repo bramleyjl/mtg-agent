@@ -606,6 +606,65 @@ async def search_rules_glossary(query: str) -> list[dict]:
     return mongodb.search_glossary(query)
 
 
+@mcp.tool()
+async def list_reference_decklists(deck_type: str | None = None, commander_name: str | None = None) -> list[dict]:
+    """
+    List reference decklists — other people's Moxfield decks synced via the browser
+    extension (recurring opponents' builds, or alternate takes on a commander John
+    also plays, e.g. linked from a strategy article). Top-level properties and card
+    names/oracle_ids only. Filter by deck_type ("opponent_meta" | "design_exemplar" |
+    "primer_reference") and/or commander_name; omit both to list everything. Use
+    get_reference_decklist() for one deck's full Scryfall-enriched card data.
+    """
+    return reference_decks.list_reference_decklists(deck_type=deck_type, commander_name=commander_name)
+
+
+@mcp.tool()
+async def get_reference_decklist(moxfield_id: str) -> dict | None:
+    """
+    Retrieve one reference decklist's full Scryfall-enriched card data (including
+    each card's scryfall_tags) plus its type/strategy_tags/source_url metadata.
+    """
+    return reference_decks.get_reference_decklist(moxfield_id)
+
+
+@mcp.tool()
+async def tune_reference_deck_tags(moxfield_id: str, tags: list[str]) -> dict:
+    """
+    Overwrite a reference deck's strategy_tags with an explicitly reviewed list.
+    get_reference_decklist() proposes/holds the current tags (auto-generated at
+    sync time from Scryfall Tagger data) — discuss them with John and pass the
+    final approved/edited list here rather than auto-applying the generated ones.
+    """
+    return reference_decks.tune_reference_deck_tags(moxfield_id, tags)
+
+
+@mcp.tool()
+async def compare_deck_to_reference(my_slug: str, ref_moxfield_id: str) -> dict:
+    """
+    Power-level/effect-density comparison between one of John's own decks and a
+    single reference decklist (typically type "opponent_meta" — a recurring
+    opponent's build). Card overlap (shared / mine-only / reference-only),
+    stats deltas (avg CMC, price, curve), color identity, and a rough tag-profile
+    diff (top Scryfall Tagger labels by card count on each side).
+    """
+    return await reference_decks.compare_deck_to_reference(my_slug, ref_moxfield_id, config)
+
+
+@mcp.tool()
+async def compare_deck_to_reference_group(
+    my_slug: str, commander_name: str, deck_type: str = "design_exemplar"
+) -> dict:
+    """
+    Card-inclusion-pattern analysis against multiple reference decklists sharing
+    a commander (default type "design_exemplar" — other builds of a commander
+    John also plays). Same shape as compare_deck_to_edhrec(): which of the
+    exemplar group's popular cards does the deck already run, and which is it
+    missing (capped at the top 25 by inclusion rate).
+    """
+    return await reference_decks.compare_deck_to_reference_group(my_slug, commander_name, config, deck_type=deck_type)
+
+
 _CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",

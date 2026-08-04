@@ -150,6 +150,10 @@ def get_reference_decklist(moxfield_id: str) -> dict[str, Any] | None:
     return get_db()["reference_decklists"].find_one({"moxfield_id": moxfield_id}, {"_id": 0})
 
 
+def get_all_reference_decklists() -> list[dict[str, Any]]:
+    return list(get_db()["reference_decklists"].find({}, {"_id": 0}))
+
+
 def get_reference_decklists_by_type(deck_type: str) -> list[dict[str, Any]]:
     return list(get_db()["reference_decklists"].find({"type": deck_type}, {"_id": 0}))
 
