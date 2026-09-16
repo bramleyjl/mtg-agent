@@ -39,7 +39,7 @@ def main() -> None:
         return
 
     lines = [
-        f"- {f['logged_at']}: commanders={f.get('commanders')} deckview_id={f.get('deckview_id')} ({f.get('reason')})"
+        f"- {f['logged_at']}: commanders={f.get('commanders')} deck_id={f.get('deck_id')} ({f.get('reason')})"
         for f in failures
     ]
     context = (

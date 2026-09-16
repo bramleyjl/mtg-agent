@@ -1,34 +1,19 @@
-// Fires whenever the page lands on deckcheck.co/app/deckview/<id> — both on a
-// real page load AND on an in-app SPA route change (DeckCheck is a single-page
-// app, so navigating from the builder to a deckview page after "Analyze" is
-// usually a pushState transition, not a full page load, which a plain
-// document-load content script would silently miss).
+// Relays deck-data payloads captured by page_fetch_hook.js (running in the
+// page's MAIN world) to background.js. Content scripts run in an isolated
+// world — they share the DOM with the page but not JS globals, so they can't
+// intercept the page's own fetch calls directly; page_fetch_hook.js does that
+// and hands off via window.postMessage, which both worlds can see.
 
 (function () {
-  let lastSentId = null;
+  window.addEventListener("message", (event) => {
+    if (event.source !== window) return;
+    const msg = event.data;
+    if (msg?.source !== "mtg-agent-deckcheck-hook" || !msg.deckId || !msg.data) return;
 
-  function checkAndSend() {
-    const match = window.location.pathname.match(/\/app\/deckview\/([A-Za-z0-9]+)/);
-    const deckviewId = match ? match[1] : null;
-    if (!deckviewId || deckviewId === lastSentId) return;
-
-    lastSentId = deckviewId;
-    chrome.runtime.sendMessage({ type: "deckcheck-analysis-detected", deckviewId });
-  }
-
-  const originalPushState = history.pushState;
-  history.pushState = function (...args) {
-    originalPushState.apply(this, args);
-    checkAndSend();
-  };
-
-  const originalReplaceState = history.replaceState;
-  history.replaceState = function (...args) {
-    originalReplaceState.apply(this, args);
-    checkAndSend();
-  };
-
-  window.addEventListener("popstate", checkAndSend);
-
-  checkAndSend();
+    chrome.runtime.sendMessage({
+      type: "deckcheck-analysis-detected",
+      deckId: msg.deckId,
+      deckData: msg.data,
+    });
+  });
 })();

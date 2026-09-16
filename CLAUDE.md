@@ -56,6 +56,10 @@ DeckCheck.co AI analyses (auto-captured by the browser extension into `decks.dec
 
 `.claude/skills/log-game/SKILL.md` packages the post-session game-recording workflow (built 2026-07-23) as a project skill, invoked via `/log-game` or naturally when John wants to record games played. Unlike the deck-analyst subagent, this is a skill rather than a subagent — the workflow is inherently interactive (elicit game details → draft properties + recap → John reviews/edits → write → sync), which fits the main conversation loop better than a delegated single-shot task. Covers: asking about `Seat Order`/`Turn Ended` explicitly (not just what's volunteered), getting exact commander names right (some named legends have multiple distinct real cards sharing a first name), and the mechanics of adding new closed-option `Enemy Commanders`/`Winner` values via `notion-update-data-source` before writing pages.
 
+## DeckCheck Brief Skill
+
+`.claude/skills/deckcheck-brief/SKILL.md` (built 2026-09-15) condenses a deck's `working_notes` Theme/Strategy and Combos sections into a short paste-ready blurb for DeckCheck.co's "Know this deck?" AI-guidance textarea (see the DeckCheck/CRISPI caveats section above). Purpose is narrow: feed CRISPI the play-pattern context it systematically misses (the Rem Karolus problem), in the small space the box actually gives — not a full deck summary. Read-only and non-writing: drafts 2-4 plain-text sentences, shows them to John, never touches Notion/MongoDB.
+
 ## Commander Format Rules
 
 - 100-card singleton (exactly 1 copy of each card except basic lands)

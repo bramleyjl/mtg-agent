@@ -1,11 +1,16 @@
-// Auto-captures DeckCheck.co AI analysis whenever content_script.js detects a
-// deckview page load — no popup interaction needed. Confirms success/failure
-// via the toolbar badge only (see setBadge below), matching the plan's
-// "zero-click, lightweight confirmation" design.
+// Auto-captures DeckCheck.co AI analysis whenever content_script.js relays a
+// deck-data fetch caught by page_fetch_hook.js — no popup interaction
+// involved. Confirms success/failure via the toolbar badge only (see setBadge
+// below), matching the plan's "zero-click, lightweight confirmation" design.
+//
+// As of 2026-09-16 the deck-data payload is captured directly from the page's
+// own fetch (see page_fetch_hook.js) rather than fetched here a second time —
+// DeckCheck's builder view now shows analysis as an in-page modal instead of
+// navigating to a separate deckview page, so there's no stable deckview id to
+// re-fetch by; the builder id in the page URL is what the payload is keyed on.
 
 const DEFAULT_SERVER = "http://YOUR_SERVER_IP:8765";
 const DEFAULT_LOCAL = "http://localhost:8765";
-const DECKCHECK_API = "https://web-production-ec9b0.up.railway.app";
 
 async function getSettings() {
   return new Promise(resolve => {
@@ -24,12 +29,6 @@ function setBadge(text, color) {
   }
 }
 
-async function fetchJson(url) {
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-  return res.json();
-}
-
 async function postToServer(serverUrl, payload) {
   const res = await fetch(`${serverUrl.replace(/\/$/, "")}/sync-deckcheck-analysis`, {
     method: "POST",
@@ -41,14 +40,9 @@ async function postToServer(serverUrl, payload) {
   return result;
 }
 
-async function handleDeckviewDetected(deckviewId) {
+async function handleDeckDataDetected(deckId, deckData) {
   try {
-    const [deckSummary, attributeRatings] = await Promise.all([
-      fetchJson(`${DECKCHECK_API}/api/dc3/deck-summary/${deckviewId}`),
-      fetchJson(`${DECKCHECK_API}/api/dc3/deck-stats/${deckviewId}?stats=attribute_ratings`),
-    ]);
-
-    const payload = { deckview_id: deckviewId, deck_summary: deckSummary, attribute_ratings: attributeRatings };
+    const payload = { deck_id: deckId, deck_data: deckData };
 
     const settings = await getSettings();
     const targets = [settings.serverUrl];
@@ -60,7 +54,7 @@ async function handleDeckviewDetected(deckviewId) {
     const anyOk = results.some(r => r.status === "fulfilled" && !r.value.error);
     const allOk = results.every(r => r.status === "fulfilled" && !r.value.error);
 
-    setBadge("✓", allOk ? "#16a34a" : anyOk ? "#eab308" : "#dc2626");
+    setBadge("OK", allOk ? "#16a34a" : anyOk ? "#eab308" : "#dc2626");
   } catch (err) {
     console.error("DeckCheck analysis sync failed:", err);
     setBadge("!", "#dc2626");
@@ -68,7 +62,7 @@ async function handleDeckviewDetected(deckviewId) {
 }
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "deckcheck-analysis-detected" && message.deckviewId) {
-    handleDeckviewDetected(message.deckviewId);
+  if (message?.type === "deckcheck-analysis-detected" && message.deckId && message.deckData) {
+    handleDeckDataDetected(message.deckId, message.deckData);
   }
 });

@@ -54,8 +54,8 @@ async def get_deck_full(slug: str) -> dict | None:
     type line, etc.) plus structured game history from MongoDB. Also includes
     `deckcheck_analysis` if the browser extension has auto-captured a DeckCheck.co
     AI analysis for this deck (analysis_preview, bracket_level, performance_index,
-    attribute_ratings, deckview_url) — a "second opinion" reference, not
-    authoritative over Moxfield's bracket_official or John's own nuanced bracket.
+    attribute_ratings, full_analysis, deckcheck_url) — a "second opinion" reference,
+    not authoritative over Moxfield's bracket_official or John's own nuanced bracket.
 
     Prefer get_deck() for lightweight queries; use this only when card text or
     game history is needed.
@@ -762,13 +762,13 @@ async def http_sync_deck(request: Request) -> JSONResponse:
 async def http_sync_deckcheck_analysis(request: Request) -> JSONResponse:
     """
     HTTP endpoint for the browser extension's DeckCheck auto-capture (see
-    chrome_extension/content_script.js + background.js). Fires whenever John
-    views a deckcheck.co deckview page — no manual sync click involved.
+    chrome_extension/page_fetch_hook.js + content_script.js + background.js).
+    Fires whenever John views a deckcheck.co builder page's "Full Synopsis"
+    analysis — no manual sync click involved.
 
     Body: {
-      "deckview_id": "...",
-      "deck_summary": { ...raw GET /api/dc3/deck-summary/{id} response... },
-      "attribute_ratings": { ...raw GET /api/dc3/deck-stats/{id}?stats=attribute_ratings response... }
+      "deck_id": "...",  # the builder id from the page URL, e.g. deckcheck.co/app/builder/<deck_id>
+      "deck_data": { ...raw GET /api/dc3/deck-data/{deck_id} response... }
     }
     """
     if request.method == "OPTIONS":
@@ -779,14 +779,13 @@ async def http_sync_deckcheck_analysis(request: Request) -> JSONResponse:
     except Exception:
         return _json_response({"error": "Invalid JSON body"}, status_code=400)
 
-    deckview_id = body.get("deckview_id")
-    deck_summary = body.get("deck_summary")
-    attribute_ratings = body.get("attribute_ratings")
+    deck_id = body.get("deck_id")
+    deck_data = body.get("deck_data")
 
-    if not deckview_id or not deck_summary:
-        return _json_response({"error": "Missing deckview_id or deck_summary"}, status_code=400)
+    if not deck_id or not deck_data:
+        return _json_response({"error": "Missing deck_id or deck_data"}, status_code=400)
 
-    result = await decks.sync_deckcheck_analysis(deckview_id, deck_summary, attribute_ratings or {})
+    result = await decks.sync_deckcheck_analysis(deck_id, deck_data)
     status = 500 if "error" in result else 200
     return _json_response(result, status_code=status)
 

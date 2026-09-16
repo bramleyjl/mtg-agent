@@ -470,28 +470,54 @@ async def resync_deck_combos(slug: str, config: Config) -> dict:
     return result
 
 
-async def sync_deckcheck_analysis(
-    deckview_id: str, deck_summary: dict, attribute_ratings: dict
-) -> dict:
+_ATTRIBUTE_RATING_RE = re.compile(
+    r"<strong>\s*(Consistency|Resilience|Interaction|Speed)\s*:\s*([\d.]+)\s*/\s*10\s*</strong>",
+    re.IGNORECASE,
+)
+
+
+def _parse_attribute_ratings(full_analysis_html: str | None) -> dict | None:
+    """
+    Extract the CRISPI component breakdown (consistency/resilience/interaction/
+    speed) from full_analysis's embedded "Attribute Ratings" HTML prose.
+
+    DeckCheck used to expose these as a separate structured
+    `GET /api/dc3/deck-stats/{id}?stats=attribute_ratings` JSON endpoint; as of
+    2026-09-16 that data only shows up inline as HTML like
+    "<strong>Consistency: 4.25/10</strong>" inside full_analysis, so this
+    regex-extracts it back into the same {consistency, resilience, interaction,
+    speed} shape other tooling already expects. Returns None if the expected
+    markup isn't found (e.g. DeckCheck rewords the section) rather than raising —
+    full_analysis itself is always stored as a fallback.
+    """
+    if not full_analysis_html:
+        return None
+    matches = _ATTRIBUTE_RATING_RE.findall(full_analysis_html)
+    if not matches:
+        return None
+    return {label.lower(): float(value) for label, value in matches}
+
+
+async def sync_deckcheck_analysis(deck_id: str, deck_data: dict) -> dict:
     """
     Store DeckCheck's AI-generated "second opinion" analysis for one of John's own
     decks, called by the browser extension's content-script auto-capture whenever
-    John views a deckcheck.co deckview page (see chrome_extension/content_script.js).
+    John views a deckcheck.co builder page's "Full Synopsis" analysis (see
+    chrome_extension/page_fetch_hook.js + content_script.js).
 
-    Matches to a deck by commander name (deck_summary["commanders"]) since
-    DeckCheck's deckview id is a per-analysis-run snapshot id, not a stable
-    per-deck identifier — reanalyzing a deck mints a brand-new id each time
-    (confirmed 2026-07-13/14), so there's no stable key to upsert on directly.
+    Matches to a deck by commander name (deck_data["commanders"]) rather than
+    deck_id directly, since deck_id is DeckCheck's own internal identifier with
+    no link to this project's own deck slugs.
 
     Only overwrites the deck's stored deckcheck_analysis if this snapshot's
-    last_analyzed is newer than what's already stored, so revisiting an old
-    bookmarked deckview link can't regress fresher data with a stale one.
+    last_analyzed is newer than what's already stored, so revisiting a stale
+    cached page load can't regress fresher data.
 
     Unmatched commanders are logged to deckcheck_sync_failures (surfaced at the
     next `claude` CLI session start in this repo — see .claude/settings.json)
     rather than raised, since a bad extension payload shouldn't be a hard error.
     """
-    commander_names = deck_summary.get("commanders") or []
+    commander_names = deck_data.get("commanders") or []
     stored = None
     for name in commander_names:
         stored = mongodb.get_deck_by_commander_name(name)
@@ -500,14 +526,14 @@ async def sync_deckcheck_analysis(
 
     if not stored:
         mongodb.log_deckcheck_sync_failure({
-            "deckview_id": deckview_id,
+            "deck_id": deck_id,
             "commanders": commander_names,
             "reason": "no matching deck for commander(s)",
         })
         return {"error": f"No matching deck for commander(s): {commander_names}"}
 
     existing = (stored.get("deckcheck_analysis") or {}).get("last_analyzed")
-    incoming = deck_summary.get("last_analyzed")
+    incoming = deck_data.get("last_analyzed")
     if existing and incoming:
         # DeckCheck returns last_analyzed as an RFC 2822 HTTP-date string
         # (e.g. "Wed, 17 Jun 2026 15:03:05 GMT") — parse before comparing,
@@ -515,15 +541,17 @@ async def sync_deckcheck_analysis(
         if parsedate_to_datetime(incoming) <= parsedate_to_datetime(existing):
             return {"slug": stored["slug"], "updated": False, "reason": "not newer than stored analysis"}
 
+    full_analysis = deck_data.get("full_analysis")
     mongodb.upsert_deck(stored["slug"], {
         "deckcheck_analysis": {
-            "analysis_preview": deck_summary.get("analysis_preview"),
-            "bracket_level": deck_summary.get("bracket_level"),
-            "performance_index": deck_summary.get("performance_index"),
-            "attribute_ratings": attribute_ratings.get("attribute_ratings"),
-            "bracket_description": deck_summary.get("bracket_description"),
-            "deckview_id": deckview_id,
-            "deckview_url": f"https://deckcheck.co/app/deckview/{deckview_id}",
+            "analysis_preview": deck_data.get("analysis_preview"),
+            "bracket_level": deck_data.get("bracket_level"),
+            "performance_index": deck_data.get("performance_index"),
+            "attribute_ratings": _parse_attribute_ratings(full_analysis),
+            "bracket_description": deck_data.get("bracket_description"),
+            "full_analysis": full_analysis,
+            "deckcheck_id": deck_id,
+            "deckcheck_url": f"https://deckcheck.co/app/builder/{deck_id}",
             "last_analyzed": incoming,
         }
     })
