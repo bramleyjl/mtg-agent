@@ -470,32 +470,47 @@ async def resync_deck_combos(slug: str, config: Config) -> dict:
     return result
 
 
-_ATTRIBUTE_RATING_RE = re.compile(
-    r"<strong>\s*(Consistency|Resilience|Interaction|Speed)\s*:\s*([\d.]+)\s*/\s*10\s*</strong>",
-    re.IGNORECASE,
-)
+# DeckCheck's DTI framework (superseded the old CRISPI attribute-ratings system
+# 2026-09-21) labels its 12 benchmarks with terse internal codes — this maps
+# each to the human-readable name shown in DeckCheck's own UI, so consumers of
+# stored deckcheck_analysis don't need to know DeckCheck's internal shorthand.
+_DTI_BENCHMARK_LABELS = {
+    "R1": "Mana Velocity",
+    "R2": "Card Flow",
+    "A1": "Selection & Redundancy",
+    "A2": "Assembly Velocity",
+    "P1": "Critical Onset",
+    "P2": "Win Compactness",
+    "P3": "Exposure",
+    "I1": "Reactive Disruption",
+    "I2": "Proactive Denial",
+    "S1": "Plan Shielding",
+    "S2": "Engine Recovery",
+    "S3": "Independence",
+}
+
+# DeckCheck's own LLM-generation bookkeeping — never useful to us, dropped
+# from the stored `dti` blob before it's written.
+_DTI_INTERNAL_KEYS = {"cost", "model", "prompt_hashes", "framework_version"}
 
 
-def _parse_attribute_ratings(full_analysis_html: str | None) -> dict | None:
+def _clean_dti(dti: dict | None) -> dict | None:
     """
-    Extract the CRISPI component breakdown (consistency/resilience/interaction/
-    speed) from full_analysis's embedded "Attribute Ratings" HTML prose.
-
-    DeckCheck used to expose these as a separate structured
-    `GET /api/dc3/deck-stats/{id}?stats=attribute_ratings` JSON endpoint; as of
-    2026-09-16 that data only shows up inline as HTML like
-    "<strong>Consistency: 4.25/10</strong>" inside full_analysis, so this
-    regex-extracts it back into the same {consistency, resilience, interaction,
-    speed} shape other tooling already expects. Returns None if the expected
-    markup isn't found (e.g. DeckCheck rewords the section) rather than raising —
-    full_analysis itself is always stored as a fallback.
+    Strip DeckCheck's own internal generation metadata from the raw `dti`
+    payload and attach a human-readable `label` to each of the 12 benchmark
+    entries (DeckCheck's codes like "R1"/"P3" aren't self-explanatory on
+    their own — see _DTI_BENCHMARK_LABELS).
     """
-    if not full_analysis_html:
+    if not dti:
         return None
-    matches = _ATTRIBUTE_RATING_RE.findall(full_analysis_html)
-    if not matches:
-        return None
-    return {label.lower(): float(value) for label, value in matches}
+    cleaned = {k: v for k, v in dti.items() if k not in _DTI_INTERNAL_KEYS}
+    benchmarks = cleaned.get("benchmarks")
+    if isinstance(benchmarks, dict):
+        cleaned["benchmarks"] = {
+            code: {"label": _DTI_BENCHMARK_LABELS.get(code, code), **entry}
+            for code, entry in benchmarks.items()
+        }
+    return cleaned
 
 
 async def sync_deckcheck_analysis(deck_id: str, deck_data: dict) -> dict:
@@ -546,10 +561,9 @@ async def sync_deckcheck_analysis(deck_id: str, deck_data: dict) -> dict:
         "deckcheck_analysis": {
             "analysis_preview": deck_data.get("analysis_preview"),
             "bracket_level": deck_data.get("bracket_level"),
-            "performance_index": deck_data.get("performance_index"),
-            "attribute_ratings": _parse_attribute_ratings(full_analysis),
             "bracket_description": deck_data.get("bracket_description"),
             "full_analysis": full_analysis,
+            "dti": _clean_dti(deck_data.get("dti")),
             "deckcheck_id": deck_id,
             "deckcheck_url": f"https://deckcheck.co/app/builder/{deck_id}",
             "last_analyzed": incoming,

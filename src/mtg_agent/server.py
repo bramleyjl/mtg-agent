@@ -53,9 +53,11 @@ async def get_deck_full(slug: str) -> dict | None:
     Retrieve full deck context: complete Scryfall card data (oracle text, mana cost,
     type line, etc.) plus structured game history from MongoDB. Also includes
     `deckcheck_analysis` if the browser extension has auto-captured a DeckCheck.co
-    AI analysis for this deck (analysis_preview, bracket_level, performance_index,
-    attribute_ratings, full_analysis, deckcheck_url) — a "second opinion" reference,
-    not authoritative over Moxfield's bracket_official or John's own nuanced bracket.
+    AI analysis for this deck (analysis_preview, bracket_level, full_analysis,
+    dti — DeckCheck's 12-benchmark DTI framework breakdown, superseded the old
+    CRISPI attribute_ratings 2026-09-21 — deckcheck_url) — a "second opinion"
+    reference, not authoritative over Moxfield's bracket_official or John's own
+    nuanced bracket.
 
     Prefer get_deck() for lightweight queries; use this only when card text or
     game history is needed.
