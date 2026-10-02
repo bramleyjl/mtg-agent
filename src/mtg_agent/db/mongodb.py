@@ -311,9 +311,13 @@ def get_cheapest_prices_by_oracle_ids(oracle_ids: list[str]) -> dict[str, float]
     """
     Batch lookup of each card's cheapest purchasable paper price, keyed by oracle_id:
     the min nonfoil USD across every printing, falling back to the min foil USD for
-    cards that were never printed nonfoil. Excludes digital printings and memorabilia
-    sets (gold-bordered World Championship decks, etc. — not tournament-legal, so not
-    a real option for a Commander deck). Cards with no USD price at all are omitted.
+    cards that were never printed nonfoil. Cards with no USD price at all are omitted.
+
+    Excludes digital printings and memorabilia sets (30th Anniversary Edition proxies,
+    Collectors' Edition, art/oversized cards, etc.) — except gold-bordered memorabilia
+    (World Championship Decks, Pro Tour Collector Set). Those aren't sanctioned-legal,
+    but John only plays unsanctioned EDH, where gold-border copies are the standard
+    way to run old/expensive Reserved List cards.
     """
     if not oracle_ids:
         return {}
@@ -321,7 +325,7 @@ def get_cheapest_prices_by_oracle_ids(oracle_ids: list[str]) -> dict[str, float]
         {"$match": {
             "oracle_id": {"$in": oracle_ids},
             "digital": False,
-            "set_type": {"$ne": "memorabilia"},
+            "$or": [{"set_type": {"$ne": "memorabilia"}}, {"border_color": "gold"}],
         }},
         {"$group": {
             "_id": "$oracle_id",

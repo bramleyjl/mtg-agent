@@ -58,7 +58,7 @@ The blind spots below were characterized against the old CRISPI system — not y
 
 `get_deck()` and `get_deck_full()` both return a `prices` block computed fresh on every read from `scryfall_bulk` (whose `default_cards` prices refresh nightly), so it never goes stale between syncs:
 - `owned_usd`: the specific printings John actually has (Moxfield-synced `scryfall_id`s), bling included, basics included.
-- `cheapest_usd`: each card at its cheapest paper printing (min nonfoil USD across printings, foil fallback for foil-only cards; digital and `memorabilia` gold-border printings excluded), with basics excluded since they're functionally free.
+- `cheapest_usd`: each card at its cheapest paper printing (min nonfoil USD across printings, foil fallback for foil-only cards; digital and non-gold-border `memorabilia` printings like 30th Anniversary proxies excluded — gold-border World Championship copies count, since John plays unsanctioned EDH where they're the standard way to run Reserved List cards), with basics excluded since they're functionally free.
 
 **Budget restraints are always judged on `cheapest_usd`**, never on `owned_usd` or the sync-time `stats.price_usd_total` snapshot. Bling inflates those: Skullbriar's Rancor is ~$13 as owned and $1 cheapest. Per-card caps (e.g. Skullbriar's "no card over $5") apply at the time a card is added, so a later price spike doesn't make an included card a violation. `get_deck_budget(slug, card_names=[])` gives the per-card breakdown and prices candidate adds (resolves front-face-only names of double-faced/split cards). Use it when tuning a budget deck.
 
