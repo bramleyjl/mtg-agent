@@ -43,6 +43,10 @@ async def get_deck(slug: str) -> dict | None:
 
     Use list_decks() to see available slugs.
     Use get_deck_full() when you need oracle text, rulings, or Notion game history.
+
+    Includes `prices`: owned_usd (the printings actually in the deck, bling and
+    all) and cheapest_usd (cheapest paper printing of every card, basics
+    excluded) — use cheapest_usd for any budget question.
     """
     return await decks.get_deck(slug, config)
 
@@ -60,9 +64,24 @@ async def get_deck_full(slug: str) -> dict | None:
     nuanced bracket.
 
     Prefer get_deck() for lightweight queries; use this only when card text or
-    game history is needed.
+    game history is needed. Includes the same `prices` block as get_deck().
     """
     return await decks.get_deck_full(slug, config)
+
+
+@mcp.tool()
+async def get_deck_budget(slug: str, card_names: list[str] | None = None) -> dict | None:
+    """
+    Per-card price breakdown for a deck: each card's owned printing price vs. its
+    cheapest paper printing, sorted most-expensive first (basics excluded), plus
+    owned/cheapest totals. Budget restraints are judged on the cheapest-printing
+    total, never Moxfield's owned-printing total, which bling versions inflate.
+
+    Pass card_names (e.g. maybeboard cards or proposed adds) to price candidate
+    cards at their cheapest printing; cheapest_usd_with_candidates gives the deck
+    total if all of them were added (before any matching cuts).
+    """
+    return await decks.get_deck_budget(slug, config, card_names=card_names)
 
 
 @mcp.tool()

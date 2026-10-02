@@ -365,6 +365,130 @@ def _slim_deck(stored: dict) -> dict:
     return result
 
 
+def _printing_usd(prices: dict) -> float | None:
+    """A specific printing's USD price: nonfoil, falling back to foil for foil-only printings."""
+    raw = prices.get("usd") or prices.get("usd_foil")
+    return float(raw) if raw else None
+
+
+def _is_basic_land(entry: dict) -> bool:
+    type_line = entry.get("scryfall", {}).get("type_line") or ""
+    return "Basic" in type_line.split("—")[0]
+
+
+def _price_breakdown(entries: list[dict]) -> tuple[list[dict], list[str]]:
+    """
+    Per-card owned vs. cheapest price for a deck's commander + mainboard entries,
+    both looked up fresh from scryfall_bulk (refreshed nightly) rather than read from
+    the price_usd snapshot stored at sync time. Owned = the specific printing synced
+    from Moxfield (what John actually has, bling included); cheapest = the cheapest
+    paper printing of the same card. Returns (rows, unpriced card names).
+    """
+    owned_by_id = get_prices_by_scryfall_ids(
+        [e["scryfall_id"] for e in entries if e.get("scryfall_id")]
+    )
+    oracle_ids = [e["scryfall"]["oracle_id"] for e in entries if e.get("scryfall", {}).get("oracle_id")]
+    cheapest_by_oracle = mongodb.get_cheapest_prices_by_oracle_ids(oracle_ids)
+
+    rows: list[dict] = []
+    unpriced: list[str] = []
+    for e in entries:
+        owned = _printing_usd(owned_by_id.get(e.get("scryfall_id", ""), {}))
+        if owned is None:
+            owned = e.get("price_usd")
+        cheapest = cheapest_by_oracle.get(e.get("scryfall", {}).get("oracle_id", ""))
+        if cheapest is None:
+            unpriced.append(e["name"])
+        rows.append({
+            "name": e["name"],
+            "quantity": e.get("quantity", 1),
+            "basic_land": _is_basic_land(e),
+            "owned_usd": owned,
+            "cheapest_usd": cheapest,
+        })
+    return rows, unpriced
+
+
+def _price_totals(rows: list[dict], unpriced: list[str]) -> dict:
+    owned = sum((r["owned_usd"] or 0) * r["quantity"] for r in rows)
+    cheapest = sum(
+        (r["cheapest_usd"] or 0) * r["quantity"] for r in rows if not r["basic_land"]
+    )
+    result: dict = {
+        "owned_usd": round(owned, 2),
+        "cheapest_usd": round(cheapest, 2),
+        "note": (
+            "owned_usd = the printings actually in the deck (as synced from Moxfield), "
+            "basics included; cheapest_usd = cheapest paper printing of every card, "
+            "basics excluded (functionally free). Both priced from Scryfall's nightly "
+            "TCGplayer data."
+        ),
+    }
+    if unpriced:
+        result["unpriced"] = unpriced
+    return result
+
+
+def _deck_prices(stored: dict) -> dict:
+    rows, unpriced = _price_breakdown(stored.get("commanders", []) + stored.get("mainboard", []))
+    return _price_totals(rows, unpriced)
+
+
+async def get_deck_budget(slug: str, config: Config, card_names: list[str] | None = None) -> dict | None:
+    """
+    Full per-card price breakdown for a deck (owned printing vs. cheapest printing),
+    sorted by cheapest price descending, plus cheapest-printing prices for optional
+    candidate cards not in the deck — for checking adds against a budget restraint.
+    """
+    deck_conf = config.decks_by_slug.get(slug)
+    if not deck_conf:
+        return None
+
+    stored = mongodb.get_deck(slug)
+    if not stored:
+        return {"error": f"Deck '{slug}' not yet synced. Run sync_deck('{slug}') first."}
+
+    rows, unpriced = _price_breakdown(stored.get("commanders", []) + stored.get("mainboard", []))
+    result: dict = {
+        "slug": slug,
+        "totals": _price_totals(rows, unpriced),
+        "cards": sorted(
+            (r for r in rows if not r["basic_land"]),
+            key=lambda r: r["cheapest_usd"] or 0,
+            reverse=True,
+        ),
+    }
+
+    if card_names:
+        resolved = {name: mongodb.resolve_oracle_card(name) for name in card_names}
+        cheapest_by_oracle = mongodb.get_cheapest_prices_by_oracle_ids(
+            [c["oracle_id"] for c in resolved.values() if c and c.get("oracle_id")]
+        )
+        deck_oracle_ids = {
+            e.get("scryfall", {}).get("oracle_id")
+            for e in stored.get("commanders", []) + stored.get("mainboard", [])
+        }
+        candidates = []
+        for name, card in resolved.items():
+            if not card:
+                candidates.append({"name": name, "error": "card not found"})
+                continue
+            candidates.append({
+                "name": card["name"],
+                "cheapest_usd": cheapest_by_oracle.get(card.get("oracle_id", "")),
+                "already_in_deck": card.get("oracle_id") in deck_oracle_ids,
+            })
+        new_cost = sum(
+            c.get("cheapest_usd") or 0
+            for c in candidates
+            if "error" not in c and not c["already_in_deck"]
+        )
+        result["candidates"] = candidates
+        result["cheapest_usd_with_candidates"] = round(result["totals"]["cheapest_usd"] + new_cost, 2)
+
+    return result
+
+
 async def get_deck(slug: str, config: Config) -> dict | None:
     """
     Retrieve a deck's top-level properties and card list (names + oracle_ids only).
@@ -385,7 +509,9 @@ async def get_deck(slug: str, config: Config) -> dict | None:
                 "bracket": deck_conf.bracket,
             },
         }
-    return _slim_deck(stored)
+    result = _slim_deck(stored)
+    result["prices"] = _deck_prices(stored)
+    return result
 
 
 async def _write_working_notes(slug: str, notes: str, config: Config) -> dict:
@@ -589,6 +715,7 @@ async def get_deck_full(slug: str, config: Config) -> dict | None:
         }
 
     result = dict(stored)
+    result["prices"] = _deck_prices(stored)
     result["game_history"] = mongodb.get_game_history(slug)
     return result
 
@@ -695,13 +822,8 @@ async def enrich_deck_cards(deck_data: dict) -> dict:
     ]
     prices_by_id = get_prices_by_scryfall_ids(all_scryfall_ids) if all_scryfall_ids else {}
 
-    def _usd(entry: dict) -> float | None:
-        p = prices_by_id.get(entry.get("scryfall_id", ""), {})
-        raw = p.get("usd") or p.get("usd_foil")
-        return float(raw) if raw else None
-
     for entry in mainboard + commander_entries:
-        price = _usd(entry)
+        price = _printing_usd(prices_by_id.get(entry.get("scryfall_id", ""), {}))
         if price is not None:
             entry["price_usd"] = price
 

@@ -307,6 +307,51 @@ def get_prices_by_scryfall_ids(scryfall_ids: list[str]) -> dict[str, dict]:
     return {d["id"]: d.get("prices", {}) for d in docs}
 
 
+def get_cheapest_prices_by_oracle_ids(oracle_ids: list[str]) -> dict[str, float]:
+    """
+    Batch lookup of each card's cheapest purchasable paper price, keyed by oracle_id:
+    the min nonfoil USD across every printing, falling back to the min foil USD for
+    cards that were never printed nonfoil. Excludes digital printings and memorabilia
+    sets (gold-bordered World Championship decks, etc. — not tournament-legal, so not
+    a real option for a Commander deck). Cards with no USD price at all are omitted.
+    """
+    if not oracle_ids:
+        return {}
+    pipeline = [
+        {"$match": {
+            "oracle_id": {"$in": oracle_ids},
+            "digital": False,
+            "set_type": {"$ne": "memorabilia"},
+        }},
+        {"$group": {
+            "_id": "$oracle_id",
+            # $toDouble(null) is null, and $min ignores nulls
+            "usd": {"$min": {"$toDouble": "$prices.usd"}},
+            "usd_foil": {"$min": {"$toDouble": "$prices.usd_foil"}},
+        }},
+    ]
+    result: dict[str, float] = {}
+    for doc in get_db()["scryfall_bulk"].aggregate(pipeline):
+        price = doc.get("usd") if doc.get("usd") is not None else doc.get("usd_foil")
+        if price is not None:
+            result[doc["_id"]] = price
+    return result
+
+
+def resolve_oracle_card(name: str) -> dict[str, Any] | None:
+    """
+    Look up Oracle data by exact name, falling back to a front-face match for
+    double-faced/split cards given by front-face name only (e.g. "Journey to
+    Eternity" → "Journey to Eternity // Atzal, Cave of Eternity").
+    """
+    card = get_oracle_card(name)
+    if card:
+        return card
+    return get_db()["scryfall_oracle"].find_one(
+        {"name": re.compile(f"^{re.escape(name)} // ", re.IGNORECASE)}, {"_id": 0}
+    )
+
+
 def get_card_rulings(oracle_id: str) -> list[dict[str, Any]]:
     """Return Oracle rulings for a card by oracle_id."""
     doc = get_db()["scryfall_rulings"].find_one({"oracle_id": oracle_id}, {"_id": 0})
