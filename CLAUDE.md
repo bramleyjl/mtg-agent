@@ -54,6 +54,14 @@ The blind spots below were characterized against the old CRISPI system — not y
 - **Individual attribute ratings were noisy between CRISPI captures** — a five-card swap once moved Atemsis's consistency 7→4.25 and speed 5→7. Whether DTI's 12 benchmarks are similarly noisy between captures is unconfirmed; compare bracket level and `lethality` across captures until that's established, rather than over-reading single-benchmark tier deltas.
 - **Never authoritative over** Moxfield's `bracket_official` or John's own decimal bracket (see the player_theory bracket-philosophy essay). When DeckCheck and John's read disagree, John's read wins and the disagreement itself may be worth recording in that deck's working notes.
 
+## Deck Pricing / Budget Restraints
+
+`get_deck()` and `get_deck_full()` both return a `prices` block computed fresh on every read from `scryfall_bulk` (whose `default_cards` prices refresh nightly), so it never goes stale between syncs:
+- `owned_usd`: the specific printings John actually has (Moxfield-synced `scryfall_id`s), bling included, basics included.
+- `cheapest_usd`: each card at its cheapest paper printing (min nonfoil USD across printings, foil fallback for foil-only cards; digital and `memorabilia` gold-border printings excluded), with basics excluded since they're functionally free.
+
+**Budget restraints are always judged on `cheapest_usd`**, never on `owned_usd` or the sync-time `stats.price_usd_total` snapshot. Bling inflates those: Skullbriar's Rancor is ~$13 as owned and $1 cheapest. Per-card caps (e.g. Skullbriar's "no card over $5") apply at the time a card is added, so a later price spike doesn't make an included card a violation. `get_deck_budget(slug, card_names=[])` gives the per-card breakdown and prices candidate adds (resolves front-face-only names of double-faced/split cards). Use it when tuning a budget deck.
+
 ## Deck Analyst Subagent
 
 `.claude/agents/deck-analyst.md` packages the deep single-deck trim/tweak review (previously redone ad hoc for Atemsis, Niv-Mizzet, etc.) as a dedicated read-only subagent. Reach for it via the `Agent` tool (`subagent_type: "deck-analyst"`) when John asks to tighten up, trim, or focus an **existing** deck he already knows — not for introducing an unfamiliar decklist from scratch. It anchors its analysis on the deck's already-recorded `working_notes` Weaknesses/Restraints/Current Focus sections (plus any specific ask given that session) and returns paired suggested inclusions & cuts for discussion. It never writes to `working_notes` itself — persisting anything stays a decision made collaboratively with John in the main conversation via `update_deck_working_notes`.
